@@ -58,7 +58,7 @@ export const demoSources = [
   normalizeSource("SRC-03", "Launch readiness notes", "Delivery review · Source C", readinessNotes),
 ];
 
-const cite = (sourceId: string, paragraphId: string, excerpt: string) => ({ sourceId, paragraphId, excerpt });
+const cite = (sourceId: string, paragraphId: string, excerpt: string) => ({ sourceId, paragraphId, excerpt, excerptLocale: "en", translatedExcerpt: null });
 
 export const demoAnalysis: ProjectAnalysis = {
   executiveSummary: "Morrow Ridge needs an editorial retreat discovery experience connected to a controlled application, acceptance, deposit, and cohort-operations workflow. The three sources are complementary: the vision brief defines the guest experience and boundaries, the workshop introduces transactional and operational detail, and the readiness notes refine privacy, accessibility, analytics, and delivery constraints.",
@@ -134,9 +134,10 @@ export function makeDemoChangeProposal(line: EstimateLine): ChangeProposal {
 }
 
 export function createInitialState(): WorkspaceState {
+  const now = new Date().toISOString();
   return {
-    project: { id: "demo", name: "Morrow Ridge retreat platform", clientName: "Morrow Ridge (fictional)", sector: "Hospitality experiences", description: "An editorial retreat discovery, application, deposit and cohort-operations platform.", status: "sources_ready", estimationUnit: "day", currency: "EUR", contingencyRate: 0.15 },
+    project: { id: "demo", name: "Morrow Ridge retreat platform", clientName: "Morrow Ridge (fictional)", sector: "Hospitality experiences", description: "An editorial retreat discovery, application, deposit and cohort-operations platform.", status: "sources_ready", estimationUnit: "day", currency: "EUR", contingencyRate: 0.15, projectLanguage: "en", resolvedProjectLanguage: "en", projectLanguageConfirmed: true, clientOutputLanguage: "same_as_project", preferences: { teamSize: 3, productiveDaysPerMonth: 17, includeReserveInOptions: false, rounding: 0.5, showEffortInClient: true, commercialModel: "fixed_price", deliverableType: "commercial_proposal" }, createdAt: now, updatedAt: now, archivedAt: null },
     sources: demoSources,
-    questions: [], decisions: [], workstreams: [], estimateLines: [], activity: [{ id: "A-01", label: "Morrow Ridge demo loaded", createdAt: new Date().toISOString() }],
+    questions: [], decisions: [], workstreams: [], estimateLines: [], activity: [{ id: "A-01", label: "Morrow Ridge demo loaded", createdAt: now, kind: "project" }], analysisVersions: [],
   };
 }

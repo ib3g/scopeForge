@@ -22,4 +22,12 @@ describe("deterministic estimation", () => {
     expect(validateRange(3, 2, 1)).toBe(false);
     expect(validateRange(-1, 2, 3)).toBe(false);
   });
+
+  it("applies project rounding and includes reserve in options only when requested", () => {
+    const totals = calculateTotals(demoEstimateLines, modules, 0.15, {
+      includeReserveInOptions: true, rounding: 5,
+    });
+    expect(totals.reserve.likely % 5).toBe(0);
+    expect(totals.options.likely).toBe(15);
+  });
 });

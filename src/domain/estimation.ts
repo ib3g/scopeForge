@@ -1,4 +1,4 @@
-import { EstimateLineSchema, type EstimateLine, type ScopeModule } from "./schemas";
+import { EstimateLineSchema, type EstimateLine, type EstimationPreferences, type ScopeModule } from "./schemas";
 
 export type EstimateTotals = {
   base: { low: number; likely: number; high: number };
@@ -9,7 +9,7 @@ export type EstimateTotals = {
 
 const empty = () => ({ low: 0, likely: 0, high: 0 });
 
-export function calculateTotals(lines: EstimateLine[], modules: ScopeModule[], contingencyRate: number): EstimateTotals {
+export function calculateTotals(lines: EstimateLine[], modules: ScopeModule[], contingencyRate: number, preferences?: Pick<EstimationPreferences, "includeReserveInOptions" | "rounding">): EstimateTotals {
   const status = new Map(modules.map((module) => [module.id, module.status]));
   const base = empty();
   const options = empty();
@@ -21,16 +21,15 @@ export function calculateTotals(lines: EstimateLine[], modules: ScopeModule[], c
     target.likely += parsed.likely;
     target.high += parsed.high;
   }
-  const reserve = {
-    low: Math.ceil(base.low * contingencyRate * 10) / 10,
-    likely: Math.ceil(base.likely * contingencyRate * 10) / 10,
-    high: Math.ceil(base.high * contingencyRate * 10) / 10,
-  };
+  const increment = preferences?.rounding ?? 0.1;
+  const round = (value: number) => Number((Math.ceil(value / increment) * increment).toFixed(6));
+  const reserve = { low: round(base.low * contingencyRate), likely: round(base.likely * contingencyRate), high: round(base.high * contingencyRate) };
+  const optionTotals = preferences?.includeReserveInOptions ? { low: options.low + round(options.low * contingencyRate), likely: options.likely + round(options.likely * contingencyRate), high: options.high + round(options.high * contingencyRate) } : options;
   return {
     base,
     reserve,
     proposed: { low: base.low + reserve.low, likely: base.likely + reserve.likely, high: base.high + reserve.high },
-    options,
+    options: optionTotals,
   };
 }
 

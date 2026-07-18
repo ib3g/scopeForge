@@ -4,6 +4,8 @@ export const CitationSchema = z.object({
   sourceId: z.string(),
   paragraphId: z.string(),
   excerpt: z.string(),
+  excerptLocale: z.string().nullable(),
+  translatedExcerpt: z.string().nullable(),
 });
 
 export const FindingSchema = z.object({
@@ -111,6 +113,13 @@ export type EstimateLine = z.infer<typeof EstimateLineSchema>;
 export type ChangeProposal = z.infer<typeof ChangeProposalSchema>;
 
 export type SourceParagraph = { id: string; text: string };
+export type SourceLanguage = {
+  detectedLocale: string | null;
+  confidence: number | null;
+  isMultilingual: boolean;
+  userOverride: string | null;
+  method: "local_heuristic" | "manual" | "unknown";
+};
 export type ProjectSource = {
   id: string;
   title: string;
@@ -118,6 +127,7 @@ export type ProjectSource = {
   origin: string;
   content: string;
   paragraphs: SourceParagraph[];
+  language: SourceLanguage;
 };
 export type Decision = {
   id: string;
@@ -127,8 +137,21 @@ export type Decision = {
   createdAt: string;
 };
 export type ProjectStatus = "draft" | "sources_ready" | "analyzed" | "clarifying" | "scoped" | "estimated" | "ready_to_export";
-export type Activity = { id: string; label: string; createdAt: string };
+export type ProjectLanguage = "auto" | "en" | "fr" | (string & {});
+export type ClientOutputLanguage = "same_as_project" | "en" | "fr" | (string & {});
+export type DeliverableType = "internal_estimate" | "client_summary" | "commercial_proposal" | "functional_appendix" | "raw_export";
+export type EstimationPreferences = {
+  teamSize: number;
+  productiveDaysPerMonth: number;
+  includeReserveInOptions: boolean;
+  rounding: 0.5 | 1 | 5;
+  showEffortInClient: boolean;
+  commercialModel: "fixed_price" | "time_and_materials";
+  deliverableType: DeliverableType;
+};
+export type Activity = { id: string; label: string; createdAt: string; kind?: "decision" | "language" | "estimate" | "ai_proposal" | "export" | "project" | "source"; before?: string | null; after?: string | null };
 export type AIExecution = { mode: "openai" | "demo_fallback"; model: string };
+export type AnalysisVersion = { id: string; locale: string; analysis: ProjectAnalysis; createdAt: string };
 
 export type WorkspaceState = {
   project: {
@@ -138,9 +161,17 @@ export type WorkspaceState = {
     sector: string;
     description: string;
     status: ProjectStatus;
-    estimationUnit: "day";
-    currency: "EUR";
+    estimationUnit: "day" | "hour";
+    currency: string;
     contingencyRate: number;
+    projectLanguage: ProjectLanguage;
+    resolvedProjectLanguage: string | null;
+    projectLanguageConfirmed: boolean;
+    clientOutputLanguage: ClientOutputLanguage;
+    preferences: EstimationPreferences;
+    createdAt: string;
+    updatedAt: string;
+    archivedAt: string | null;
   };
   sources: ProjectSource[];
   analysis?: ProjectAnalysis;
@@ -150,5 +181,6 @@ export type WorkspaceState = {
   estimateLines: EstimateLine[];
   changeProposal?: ChangeProposal;
   activity: Activity[];
+  analysisVersions: AnalysisVersion[];
   aiExecution?: AIExecution;
 };

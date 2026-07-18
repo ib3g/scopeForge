@@ -3,6 +3,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { ChangeProposalSchema, EstimateProposalSchema, ProjectAnalysisSchema, QuestionsSchema, ScopeSchema } from "@/domain/schemas";
 import { demoAnalysis, demoEstimateLines, demoQuestions, demoWorkstreams, makeDemoChangeProposal } from "@/infrastructure/demo-data";
+import { frenchDemoAnalysis, frenchDemoEstimateLines, frenchDemoQuestions, frenchDemoWorkstreams, makeFrenchDemoChangeProposal } from "@/infrastructure/demo-data-fr";
 
 export type AIAction = "analysis" | "questions" | "scope" | "estimate" | "review";
 const schemas = { analysis: ProjectAnalysisSchema, questions: QuestionsSchema, scope: ScopeSchema, estimate: EstimateProposalSchema, review: ChangeProposalSchema } as const;
@@ -25,15 +26,22 @@ Rules:
 - Preserve uncertainty; never silently resolve a real inconsistency.
 - Do not calculate project totals.
 - Do not apply changes or overwrite user-approved decisions.
+- Generate user-facing values in the resolved project language supplied in languageContext. Keep JSON keys, identifiers and enum values in English.
+- Keep every cited excerpt in its original language. Set excerptLocale explicitly. A short translation may be placed only in translatedExcerpt; otherwise use null.
+- Do not mix languages inside one generated sentence without a material reason. Preserve proper nouns and technical terms.
+- Treat semantically equivalent translations as duplicates, not inconsistencies. Merge cross-language duplicates while preserving every useful citation.
+- Flag ambiguity that appears caused by translation, but never manufacture a conflict from wording alone.
 - Return only data matching the supplied schema.`;
 
 function fallbackFor(action: AIAction, payload: unknown) {
-  if (action === "analysis") return demoAnalysis;
-  if (action === "questions") return { questions: demoQuestions };
-  if (action === "scope") return { workstreams: demoWorkstreams };
-  if (action === "estimate") return { lines: demoEstimateLines };
+  const context = z.object({ languageContext: z.object({ projectLanguage: z.string() }).optional() }).passthrough().safeParse(payload);
+  const french = context.success && context.data.languageContext?.projectLanguage === "fr";
+  if (action === "analysis") return french ? frenchDemoAnalysis : demoAnalysis;
+  if (action === "questions") return { questions: french ? frenchDemoQuestions : demoQuestions };
+  if (action === "scope") return { workstreams: french ? frenchDemoWorkstreams : demoWorkstreams };
+  if (action === "estimate") return { lines: french ? frenchDemoEstimateLines : demoEstimateLines };
   const line = z.object({ line: EstimateProposalSchema.shape.lines.element }).parse(payload).line;
-  return makeDemoChangeProposal(line);
+  return french ? makeFrenchDemoChangeProposal(line) : makeDemoChangeProposal(line);
 }
 
 function assertCitationProvenance(data: unknown, payload: unknown) {
@@ -65,7 +73,7 @@ export async function runStructuredAction(action: AIAction, payload: unknown) {
         model,
         input: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `${prompts[action]}\n\n<untrusted_project_data>\n${JSON.stringify(payload)}\n</untrusted_project_data>${attempt ? "\nPrevious output failed validation. Return a corrected schema-valid result." : ""}` },
+          { role: "user", content: `${prompts[action]}\nUse languageContext.projectLanguage for every generated user-facing value. languageContext.interfaceLocale is UI context only and languageContext.clientOutputLanguage applies to client deliverables. Source language metadata is advisory; quoted excerpts must remain original.\n\n<untrusted_project_data>\n${JSON.stringify(payload)}\n</untrusted_project_data>${attempt ? "\nPrevious output failed validation. Return a corrected schema-valid result." : ""}` },
         ],
         text: { format: zodTextFormat(schema, `scopeforge_${action}`) },
         max_output_tokens: 12000,

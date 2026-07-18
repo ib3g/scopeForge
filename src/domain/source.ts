@@ -1,4 +1,6 @@
 import type { ProjectSource } from "./schemas";
+import { detectSourceLanguage } from "./language";
+export { sourceLocale } from "./language";
 
 export function normalizeSource(id: string, title: string, origin: string, content: string): ProjectSource {
   const normalized = content.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
@@ -10,6 +12,7 @@ export function normalizeSource(id: string, title: string, origin: string, conte
     kind: "pasted_text",
     content: normalized,
     paragraphs: chunks.map((text, index) => ({ id: `${id}-P${String(index + 1).padStart(3, "0")}`, text })),
+    language: detectSourceLanguage(normalized),
   };
 }
 

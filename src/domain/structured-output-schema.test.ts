@@ -35,5 +35,7 @@ describe("OpenAI structured output schemas", () => {
   it("uses required nullable values for semantically optional fields", () => {
     expect(ProjectAnalysisSchema.shape.inconsistencies.element.shape.resolution.safeParse(null).success).toBe(true);
     expect(QuestionsSchema.shape.questions.element.shape.answer.safeParse(null).success).toBe(true);
+    expect(ProjectAnalysisSchema.shape.findings.element.shape.citations.element.shape.excerptLocale.safeParse(null).success).toBe(true);
+    expect(ProjectAnalysisSchema.shape.findings.element.shape.citations.element.shape.translatedExcerpt.safeParse(null).success).toBe(true);
   });
 });
