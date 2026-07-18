@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { en } from "./catalogs/en";
 import { fr } from "./catalogs/fr";
+import { SelectField } from "@/ui/primitives/select-field";
 
 export type InterfaceLocale = "en" | "fr";
 export type SupportedLocale = InterfaceLocale | (string & {});
@@ -73,5 +74,5 @@ export function useI18n() {
 
 export function LanguageSelector({ compact = false }: { compact?: boolean }) {
   const { locale, setLocale, t } = useI18n();
-  return <label className={`language-selector ${compact ? "compact" : ""}`}><span className="sr-only">{t("preferences.interfaceLanguage")}</span><select aria-label={t("preferences.interfaceLanguage")} value={locale} onChange={(event) => setLocale(event.target.value as InterfaceLocale)}><option value="en">EN</option><option value="fr">FR</option></select></label>;
+  return <SelectField className={`language-selector ${compact ? "compact" : ""}`} size="compact" ariaLabel={t("preferences.interfaceLanguage")} value={locale} onValueChange={(value) => setLocale(value as InterfaceLocale)} options={[{ value: "en", label: "EN" }, { value: "fr", label: "FR" }]}/>;
 }

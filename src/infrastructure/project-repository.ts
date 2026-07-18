@@ -1,12 +1,13 @@
 import type { ClientOutputLanguage, ProjectLanguage, WorkspaceState } from "@/domain/schemas";
 import { detectSourceLanguage } from "@/domain/language";
+import { readinessFor } from "@/domain/project-lifecycle";
 import { createInitialState } from "./demo-data";
 import { createFrenchDemoState } from "./demo-data-fr";
 
 const STORAGE_KEY = "scopeforge-projects-v3";
 const LEGACY_KEY = "scopeforge-morrow-ridge-v2";
 
-export type ProjectSummary = Pick<WorkspaceState["project"], "id" | "name" | "clientName" | "sector" | "status" | "projectLanguage" | "resolvedProjectLanguage" | "createdAt" | "updatedAt" | "archivedAt"> & { progress: number; sourceCount: number };
+export type ProjectSummary = Pick<WorkspaceState["project"], "id" | "mode" | "name" | "clientName" | "sector" | "status" | "projectLanguage" | "resolvedProjectLanguage" | "createdAt" | "updatedAt" | "archivedAt"> & { progress: number; sourceCount: number };
 
 export interface ProjectRepository {
   list(): WorkspaceState[];
@@ -30,18 +31,31 @@ export function normalizeWorkspaceState(input: WorkspaceState, fallbackId?: stri
   const raw = structuredClone(input) as WorkspaceState;
   const template = fallbackId === "demo-fr" || raw.project?.id === "demo-fr" ? createFrenchDemoState() : createInitialState();
   const now = new Date().toISOString();
+  const legacyStatus = raw.project?.status as string | undefined;
+  const normalizedStatus = legacyStatus === "sources_ready"
+    ? "draft"
+    : legacyStatus === "analyzed" || legacyStatus === "clarifying" || legacyStatus === "scoped"
+      ? "scope_ready"
+      : legacyStatus === "estimated" || legacyStatus === "ready_to_export"
+        ? "estimate_ready"
+        : legacyStatus;
+  const validStatuses = new Set(["draft", "analyzing", "scope_ready", "estimate_ready", "in_review", "internally_approved", "proposal_ready", "archived"]);
   raw.project = {
     ...template.project,
     ...raw.project,
     id: raw.project?.id || fallbackId || template.project.id,
+    mode: raw.project?.mode ?? ((raw.project?.id === "demo" || raw.project?.id === "demo-fr" || fallbackId === "demo" || fallbackId === "demo-fr") ? "demo" : "live"),
     preferences: { ...template.project.preferences, ...(raw.project?.preferences ?? {}) },
     projectLanguage: raw.project?.projectLanguage ?? template.project.projectLanguage,
     resolvedProjectLanguage: raw.project?.resolvedProjectLanguage ?? template.project.resolvedProjectLanguage,
     projectLanguageConfirmed: raw.project?.projectLanguageConfirmed ?? template.project.projectLanguageConfirmed,
     clientOutputLanguage: raw.project?.clientOutputLanguage ?? template.project.clientOutputLanguage,
+    estimationMethodId: raw.project?.estimationMethodId ?? template.project.estimationMethodId ?? null,
+    estimationMethodOverrides: raw.project?.estimationMethodOverrides ?? template.project.estimationMethodOverrides ?? {},
     createdAt: raw.project?.createdAt ?? now,
     updatedAt: raw.project?.updatedAt ?? now,
     archivedAt: raw.project?.archivedAt ?? null,
+    status: (validStatuses.has(normalizedStatus ?? "") ? normalizedStatus : "draft") as WorkspaceState["project"]["status"],
   };
   raw.sources = (raw.sources ?? []).map((source) => ({ ...source, language: source.language ?? detectSourceLanguage(source.content) }));
   raw.questions ??= [];
@@ -50,6 +64,26 @@ export function normalizeWorkspaceState(input: WorkspaceState, fallbackId?: stri
   raw.estimateLines ??= [];
   raw.activity ??= [];
   raw.analysisVersions ??= [];
+  const legacyExecution = raw.aiExecution as unknown as { mode?: string; model?: string } | undefined;
+  if (legacyExecution?.mode) {
+    raw.aiExecution = {
+      action: "analysis",
+      executionMode: legacyExecution.mode === "openai" ? "live" : "demo_precomputed",
+      model: legacyExecution.mode === "openai" ? (legacyExecution.model ?? null) : null,
+      generatedAt: raw.project.updatedAt,
+      promptVersion: "legacy-before-live-boundary",
+      sourceChecksum: "legacy-unavailable",
+      requestId: null,
+    };
+  }
+  raw.aiExecutions ??= raw.aiExecution ? { [raw.aiExecution.action ?? "analysis"]: raw.aiExecution } : {};
+  raw.referenceCaseIds ??= [];
+  raw.referenceMatches ??= [];
+  raw.referenceInfluences ??= raw.analysis?.referenceInfluences ?? [];
+  raw.estimateSnapshots ??= [];
+  raw.approvedEstimateSnapshotId ??= null;
+  raw.proposalSnapshot ??= null;
+  raw.acknowledgedValidationWarnings ??= [];
   enhanceCitations(raw);
   return raw;
 }
@@ -92,8 +126,8 @@ function newProjectId() {
 }
 
 export function projectSummary(state: WorkspaceState): ProjectSummary {
-  const complete = [state.sources.length > 0, !!state.analysis, state.decisions.length > 0, state.estimateLines.length > 0, state.project.status === "ready_to_export"].filter(Boolean).length;
-  return { ...state.project, progress: Math.round(complete / 5 * 100), sourceCount: state.sources.length };
+  const readiness = readinessFor(state);
+  return { ...state.project, progress: readiness.progress, sourceCount: state.sources.length };
 }
 
 export function createEmptyProject(input: { name: string; clientName?: string; sector?: string; projectLanguage: ProjectLanguage; clientOutputLanguage: ClientOutputLanguage; estimationUnit: "day" | "hour"; currency: string; contingencyRate: number }): WorkspaceState {
@@ -102,8 +136,8 @@ export function createEmptyProject(input: { name: string; clientName?: string; s
   const base = createInitialState();
   return normalizeWorkspaceState({
     ...base,
-    project: { ...base.project, id, name: input.name.trim(), clientName: input.clientName?.trim() ?? "", sector: input.sector?.trim() ?? "", description: "", status: "draft", estimationUnit: input.estimationUnit, currency: input.currency, contingencyRate: input.contingencyRate, projectLanguage: input.projectLanguage, resolvedProjectLanguage: input.projectLanguage === "auto" ? null : input.projectLanguage, projectLanguageConfirmed: input.projectLanguage !== "auto", clientOutputLanguage: input.clientOutputLanguage, createdAt: now, updatedAt: now, archivedAt: null },
-    sources: [], analysis: undefined, questions: [], decisions: [], workstreams: [], estimateLines: [], changeProposal: undefined, activity: [{ id: `A-${Date.now()}`, label: "Project created", createdAt: now, kind: "project" }], analysisVersions: [], aiExecution: undefined,
+    project: { ...base.project, id, mode: "live", name: input.name.trim(), clientName: input.clientName?.trim() ?? "", sector: input.sector?.trim() ?? "", description: "", status: "draft", estimationUnit: input.estimationUnit, currency: input.currency, contingencyRate: input.contingencyRate, projectLanguage: input.projectLanguage, resolvedProjectLanguage: input.projectLanguage === "auto" ? null : input.projectLanguage, projectLanguageConfirmed: input.projectLanguage !== "auto", clientOutputLanguage: input.clientOutputLanguage, createdAt: now, updatedAt: now, archivedAt: null },
+    sources: [], analysis: undefined, questions: [], decisions: [], workstreams: [], estimateLines: [], changeProposal: undefined, activity: [{ id: `A-${Date.now()}`, label: "Project created", createdAt: now, kind: "project" }], analysisVersions: [], aiExecution: undefined, aiExecutions: {}, referenceCaseIds: [], referenceMatches: [], referenceInfluences: [], estimationComparison: undefined, estimateSnapshots: [], approvedEstimateSnapshotId: null, proposalSnapshot: null, acknowledgedValidationWarnings: [],
   });
 }
 

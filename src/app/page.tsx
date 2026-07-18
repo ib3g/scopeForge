@@ -1,20 +1,64 @@
 "use client";
 
-import { Archive, ArrowRight, Check, Copy, FileText, FolderPlus, MoreHorizontal, Quote, Search, Sparkles, Trash2, X } from "lucide-react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+
+import {
+  Archive,
+  ArrowRight,
+  Check,
+  Copy,
+  FileText,
+  FolderPlus,
+  MoreHorizontal,
+  Quote,
+  Search,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { ClientOutputLanguage, ProjectLanguage, WorkspaceState } from "@/domain/schemas";
+import type {
+  ClientOutputLanguage,
+  ProjectLanguage,
+  WorkspaceState,
+} from "@/domain/schemas";
 import { createInitialState } from "@/infrastructure/demo-data";
 import { createFrenchDemoState } from "@/infrastructure/demo-data-fr";
-import { createEmptyProject, duplicateProject, projectRepository, projectSummary } from "@/infrastructure/project-repository";
+import {
+  createEmptyProject,
+  duplicateProject,
+  projectRepository,
+  projectSummary,
+} from "@/infrastructure/project-repository";
 import { LanguageSelector, useI18n } from "@/i18n";
+import { SelectField } from "@/ui/primitives/select-field";
+import { Modal } from "@/ui/primitives/drawer";
 
-type CreateForm = { name: string; clientName: string; sector: string; projectLanguage: ProjectLanguage; clientOutputLanguage: ClientOutputLanguage; estimationUnit: "day" | "hour"; currency: string; contingencyRate: number };
-const emptyForm: CreateForm = { name: "", clientName: "", sector: "", projectLanguage: "auto", clientOutputLanguage: "same_as_project", estimationUnit: "day", currency: "EUR", contingencyRate: 0.15 };
+type CreateForm = {
+  name: string;
+  clientName: string;
+  sector: string;
+  projectLanguage: ProjectLanguage;
+  clientOutputLanguage: ClientOutputLanguage;
+  estimationUnit: "day" | "hour";
+  currency: string;
+  contingencyRate: number;
+};
+const emptyForm: CreateForm = {
+  name: "",
+  clientName: "",
+  sector: "",
+  projectLanguage: "auto",
+  clientOutputLanguage: "same_as_project",
+  estimationUnit: "day",
+  currency: "EUR",
+  contingencyRate: 0.15,
+};
 
 export default function Home() {
   const router = useRouter();
-  const { t, date, locale } = useI18n();
+  const { t, date } = useI18n();
   const [projects, setProjects] = useState<WorkspaceState[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"active" | "archived">("active");
@@ -29,26 +73,501 @@ export default function Home() {
     // Keep the server and first client render identical, then hydrate the local repository.
     queueMicrotask(refresh);
   }, []);
-  const visible = useMemo(() => projects.filter((state) => Boolean(state.project.archivedAt) === (filter === "archived") && `${state.project.name} ${state.project.clientName} ${state.project.sector}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [projects, query, filter]);
+  const visible = useMemo(
+    () =>
+      projects.filter(
+        (state) =>
+          Boolean(state.project.archivedAt) === (filter === "archived") &&
+          `${state.project.name} ${state.project.clientName} ${state.project.sector}`
+            .toLocaleLowerCase()
+            .includes(query.toLocaleLowerCase()),
+      ),
+    [projects, query, filter],
+  );
 
-  const loadDemo = (language: "en" | "fr") => { const state = language === "fr" ? createFrenchDemoState() : createInitialState(); projectRepository.save(state); router.push(`/projects/${state.project.id}/sources`); };
-  const create = () => { if (!form.name.trim()) return; const state = createEmptyProject(form); projectRepository.save(state); setCreateOpen(false); setForm(emptyForm); router.push(`/projects/${state.project.id}/sources`); };
-  const archive = (state: WorkspaceState) => { projectRepository.save({ ...state, project: { ...state.project, archivedAt: state.project.archivedAt ? null : new Date().toISOString() } }); refresh(); };
-  const duplicate = (state: WorkspaceState) => { projectRepository.save(duplicateProject(state)); refresh(); };
-  const saveRename = (state: WorkspaceState) => { if (renameValue.trim()) projectRepository.save({ ...state, project: { ...state.project, name: renameValue.trim() } }); setRenaming(undefined); refresh(); };
+  const loadDemo = (language: "en" | "fr") => {
+    const state =
+      language === "fr" ? createFrenchDemoState() : createInitialState();
+    projectRepository.save(state);
+    router.push(`/projects/${state.project.id}/sources`);
+  };
+  const create = () => {
+    if (!form.name.trim()) return;
+    const state = createEmptyProject(form);
+    projectRepository.save(state);
+    setCreateOpen(false);
+    setForm(emptyForm);
+    router.push(`/projects/${state.project.id}/sources`);
+  };
+  const archive = (state: WorkspaceState) => {
+    projectRepository.save({
+      ...state,
+      project: {
+        ...state.project,
+        archivedAt: state.project.archivedAt ? null : new Date().toISOString(),
+      },
+    });
+    refresh();
+  };
+  const duplicate = (state: WorkspaceState) => {
+    projectRepository.save(duplicateProject(state));
+    refresh();
+  };
+  const saveRename = (state: WorkspaceState) => {
+    if (renameValue.trim())
+      projectRepository.save({
+        ...state,
+        project: { ...state.project, name: renameValue.trim() },
+      });
+    setRenaming(undefined);
+    refresh();
+  };
 
-  return <main className="landing dashboard-page" id="main-content">
-    <header className="landing-nav"><div className="landing-brand"><span className="brand-signal" aria-hidden="true"><i/><i/><i/><i/></span><span>ScopeForge</span></div><div className="landing-nav-actions"><span className="landing-event">{t("onboarding.buildWeek")}</span><LanguageSelector/></div></header>
-    <section className="landing-hero dashboard-hero">
-      <div className="landing-copy"><div className="landing-kicker"><span>{t("onboarding.kicker")}</span><i/></div><h1>{locale === "fr" ? <>Des preuves projet<br/>à un périmètre<br/><em>défendable.</em></> : <>Project evidence,<br/>turned into a scope<br/>you can <em>defend.</em></>}</h1><p>{t("onboarding.copy")}</p><div className="landing-actions"><button className="btn btn-primary landing-cta" aria-label={locale === "en" ? "Load demo project" : t("onboarding.loadDemo")} onClick={() => loadDemo("en")}>{t("onboarding.loadDemo")} <ArrowRight size={17}/></button><button className="btn landing-cta" onClick={() => loadDemo("fr")}>{t("onboarding.loadFrenchDemo")}</button><button className="btn btn-ghost landing-cta" onClick={() => setCreateOpen(true)}><FolderPlus size={17}/>{t("onboarding.createProject")}</button></div><div className="landing-proof"><span><Check size={14}/>{t("onboarding.proofProvenance")}</span><span><Check size={14}/>{t("onboarding.proofTotals")}</span><span><Check size={14}/>{t("onboarding.proofReview")}</span></div></div>
-      <figure className="product-frame"><div className="product-preview" aria-label="ScopeForge product preview"><div className="preview-orbit"><span>84<small>%</small></span><i>{t("onboarding.evidenceCoverage")}</i></div><div className="preview-window"><div className="preview-top"><span className="brand-signal small"><i/><i/><i/><i/></span><strong>Calyra</strong><span>FR + EN</span></div><div className="preview-heading"><span>{locale === "fr" ? "Preuves consolidées" : "Consolidated evidence"}</span><strong>{locale === "fr" ? "Ce que chaque source apporte" : "What each source adds"}</strong></div><div className="preview-grid"><article><FileText/><span>{locale === "fr" ? "Note de programme" : "Programme brief"}</span><strong>{locale === "fr" ? "Introduit l’expérience publique" : "Introduces public experience"}</strong><small>4 citations · FR</small></article><article><Sparkles/><span>{locale === "fr" ? "Atelier fonctionnel" : "Functional workshop"}</span><strong>{locale === "fr" ? "Complète les demandes" : "Complements request flows"}</strong><small>6 citations · FR</small></article><article><Quote/><span>Technical memo</span><strong>{locale === "fr" ? "Précise la conformité" : "Refines compliance"}</strong><small>3 citations · EN/FR</small></article></div><div className="preview-decision"><Check/><span><strong>{t("onboarding.decisionRecorded")}</strong><small>{locale === "fr" ? "Les attributions restent contrôlées" : "Assignments remain coordinator-controlled"}</small></span></div></div></div><figcaption><strong>Calyra</strong><span>{t("onboarding.traceableRecord")}</span></figcaption></figure>
-    </section>
+  return (
+    <main className="landing dashboard-page" id="main-content">
+      <header className="landing-nav">
+        <div className="landing-brand">
+          <span className="brand-signal" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>ScopeForge</span>
+        </div>
+        <div className="landing-nav-actions">
+          <span className="landing-event">{t("onboarding.buildWeek")}</span>
+          <LanguageSelector />
+        </div>
+      </header>
+      <section className="landing-hero dashboard-hero">
+        <div className="landing-copy">
+          <div className="landing-kicker">
+            <span>{t("onboarding.kicker")}</span>
+            <i />
+          </div>
+          <h1>{t("onboarding.title")}</h1>
+          <p>{t("onboarding.copy")}</p>
+          <div className="landing-actions">
+            <button
+              className="btn btn-primary landing-cta"
+              aria-label={t("onboarding.loadDemo")}
+              onClick={() => loadDemo("en")}
+            >
+              {t("onboarding.loadDemo")} <ArrowRight size={17} />
+            </button>
+            <button className="btn landing-cta" onClick={() => loadDemo("fr")}>
+              {t("onboarding.loadFrenchDemo")}
+            </button>
+            <button
+              className="btn btn-ghost landing-cta"
+              onClick={() => setCreateOpen(true)}
+            >
+              <FolderPlus size={17} />
+              {t("onboarding.createProject")}
+            </button>
+          </div>
+          <div className="landing-proof">
+            <span>
+              <Check size={14} />
+              {t("onboarding.proofProvenance")}
+            </span>
+            <span>
+              <Check size={14} />
+              {t("onboarding.proofTotals")}
+            </span>
+            <span>
+              <Check size={14} />
+              {t("onboarding.proofReview")}
+            </span>
+          </div>
+        </div>
+        <figure className="product-frame">
+          <div
+            className="product-preview"
+            aria-label={t("onboarding.previewLabel")}
+          >
+            <div className="preview-orbit">
+              <span>
+                84<small>%</small>
+              </span>
+              <i>{t("onboarding.evidenceCoverage")}</i>
+            </div>
+            <div className="preview-window">
+              <div className="preview-top">
+                <span className="brand-signal small">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <strong>Calyra</strong>
+                <span>FR + EN</span>
+              </div>
+              <div className="preview-heading">
+                <span>{t("onboarding.previewSection")}</span>
+                <strong>{t("onboarding.previewTitle")}</strong>
+              </div>
+              <div className="preview-grid">
+                <article>
+                  <FileText />
+                  <span>{t("onboarding.programmeBrief")}</span>
+                  <strong>{t("onboarding.programmeContribution")}</strong>
+                  <small>4 citations · FR</small>
+                </article>
+                <article>
+                  <Sparkles />
+                  <span>{t("onboarding.functionalWorkshop")}</span>
+                  <strong>{t("onboarding.workshopContribution")}</strong>
+                  <small>6 citations · FR</small>
+                </article>
+                <article>
+                  <Quote />
+                  <span>{t("onboarding.technicalMemo")}</span>
+                  <strong>{t("onboarding.technicalContribution")}</strong>
+                  <small>3 citations · EN/FR</small>
+                </article>
+              </div>
+              <div className="preview-decision">
+                <Check />
+                <span>
+                  <strong>{t("onboarding.decisionRecorded")}</strong>
+                  <small>{t("onboarding.demoRecordedDecision")}</small>
+                </span>
+              </div>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Calyra</strong>
+            <span>{t("onboarding.traceableRecord")}</span>
+          </figcaption>
+        </figure>
+      </section>
 
-    <section className="projects-section" aria-labelledby="projects-title"><div className="projects-heading"><div><span className="eyebrow">{t("projects.dashboardEyebrow")}</span><h2 id="projects-title">{t("projects.dashboardTitle")}</h2><p>{t("projects.dashboardCopy")}</p></div><button className="btn btn-primary" onClick={() => setCreateOpen(true)}><FolderPlus size={16}/>{t("projects.newProject")}</button></div><div className="projects-toolbar"><label><Search size={16}/><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("projects.searchPlaceholder")}/></label><div className="filter-group"><button className={`btn btn-sm ${filter === "active" ? "btn-primary" : ""}`} onClick={() => setFilter("active")}>{t("projects.active")}</button><button className={`btn btn-sm ${filter === "archived" ? "btn-primary" : ""}`} onClick={() => setFilter("archived")}>{t("projects.archived")}</button></div></div>
-      {visible.length ? <div className="project-grid">{visible.map((state) => { const summary = projectSummary(state); const language = summary.resolvedProjectLanguage ?? summary.projectLanguage; return <article className="project-card" key={summary.id}><div className="project-card-top"><span className="project-monogram">{summary.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase()}</span><div className="project-card-menu"><MoreHorizontal size={18}/><div><button onClick={() => { setRenaming(summary.id); setRenameValue(summary.name); }}>{t("common.rename")}</button><button onClick={() => duplicate(state)}><Copy size={13}/>{t("common.duplicate")}</button><button onClick={() => archive(state)}><Archive size={13}/>{summary.archivedAt ? t("projects.restoreProject") : t("common.archive")}</button><button className="destructive" onClick={() => setDeleteTarget(state)}><Trash2 size={13}/>{t("common.delete")}</button></div></div></div>{renaming === summary.id ? <div className="rename-row"><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveRename(state); if (event.key === "Escape") setRenaming(undefined); }}/><button className="btn btn-sm" onClick={() => saveRename(state)}>{t("common.save")}</button></div> : <><h3>{summary.name}</h3><p>{summary.clientName || summary.sector || t("projects.emptyTitle")}</p></>}<div className="project-meta"><span className="badge badge-green">{language === "fr" ? t("common.french") : language === "en" ? t("common.english") : t("common.automatic")}</span><span>{summary.sourceCount} {t("common.sources")}</span><span>{t("projects.updated", { date: date(summary.updatedAt, { dateStyle: "medium" }) })}</span></div><div className="project-progress"><span>{t("projects.progress", { count: summary.progress })}</span><div className="nav-progress"><i style={{ width: `${summary.progress}%` }}/></div></div><button className="project-open" onClick={() => router.push(`/projects/${summary.id}/sources`)}>{t("projects.openProject")}<ArrowRight size={16}/></button></article>; })}</div> : <div className="empty-step projects-empty"><span className="empty-step-icon"><FolderPlus/></span><h3>{t("projects.noProjects")}</h3><p>{t("projects.noProjectsCopy")}</p></div>}
-    </section>
+      <section className="projects-section" aria-labelledby="projects-title">
+        <div className="projects-heading">
+          <div>
+            <span className="eyebrow">{t("projects.dashboardEyebrow")}</span>
+            <h2 id="projects-title">{t("projects.dashboardTitle")}</h2>
+            <p>{t("projects.dashboardCopy")}</p>
+          </div>
+          <div className="projects-heading-actions">
+            <Link className="btn btn-ghost" href="/methods">{t("library.methods")}</Link>
+            <Link className="btn btn-ghost" href="/references">{t("library.references")}</Link>
+            <button className="btn btn-primary" onClick={() => setCreateOpen(true)}><FolderPlus size={16} />{t("projects.newProject")}</button>
+          </div>
+        </div>
+        <div className="projects-toolbar">
+          <label>
+            <Search size={16} />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("projects.searchPlaceholder")}
+            />
+          </label>
+          <div className="filter-group">
+            <button
+              className={`btn btn-sm ${filter === "active" ? "btn-primary" : ""}`}
+              onClick={() => setFilter("active")}
+            >
+              {t("projects.active")}
+            </button>
+            <button
+              className={`btn btn-sm ${filter === "archived" ? "btn-primary" : ""}`}
+              onClick={() => setFilter("archived")}
+            >
+              {t("projects.archived")}
+            </button>
+          </div>
+        </div>
+        {visible.length ? (
+          <div className="project-grid">
+            {visible.map((state) => {
+              const summary = projectSummary(state);
+              const language =
+                summary.resolvedProjectLanguage ?? summary.projectLanguage;
+              return (
+                <article className="project-card" key={summary.id}>
+                  <div className="project-card-top">
+                    <span className="project-monogram">
+                      {summary.name
+                        .split(/\s+/)
+                        .map((word) => word[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase()}
+                    </span>
+                    <DropdownMenu.Root>
+                      <DropdownMenu.Trigger
+                        className="project-menu-trigger"
+                        aria-label={`${t("common.project")} · ${summary.name}`}
+                      >
+                        <MoreHorizontal size={18} />
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                          className="project-menu-content"
+                          sideOffset={7}
+                          align="end"
+                          collisionPadding={12}
+                        >
+                          <DropdownMenu.Item
+                            onSelect={() => {
+                              setRenaming(summary.id);
+                              setRenameValue(summary.name);
+                            }}
+                          >
+                            <span>{t("common.rename")}</span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => duplicate(state)}>
+                            <Copy size={14} />
+                            <span>{t("common.duplicate")}</span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => archive(state)}>
+                            <Archive size={14} />
+                            <span>
+                              {summary.archivedAt
+                                ? t("projects.restoreProject")
+                                : t("common.archive")}
+                            </span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Separator />
+                          <DropdownMenu.Item
+                            className="destructive"
+                            onSelect={() => setDeleteTarget(state)}
+                          >
+                            <Trash2 size={14} />
+                            <span>{t("common.delete")}</span>
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                  </div>
+                  {renaming === summary.id ? (
+                    <div className="rename-row">
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") saveRename(state);
+                          if (event.key === "Escape") setRenaming(undefined);
+                        }}
+                      />
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => saveRename(state)}
+                      >
+                        {t("common.save")}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <h3>{summary.name}</h3>
+                      <p>
+                        {summary.clientName ||
+                          summary.sector ||
+                          t("projects.emptyTitle")}
+                      </p>
+                    </>
+                  )}
+                  <div className="project-meta">
+                    <span
+                      className={`badge ${summary.mode === "demo" ? "badge-amber" : "badge-green"}`}
+                    >
+                      {summary.mode === "demo"
+                        ? t("projects.demoProject")
+                        : t("projects.liveProject")}
+                    </span>
+                    <span className="badge badge-green">
+                      {language === "fr"
+                        ? t("common.french")
+                        : language === "en"
+                          ? t("common.english")
+                          : t("common.automatic")}
+                    </span>
+                    <span>
+                      {summary.sourceCount} {t("common.sources")}
+                    </span>
+                    <span>
+                      {t("projects.updated", {
+                        date: date(summary.updatedAt, { dateStyle: "medium" }),
+                      })}
+                    </span>
+                  </div>
+                  <div className="project-progress">
+                    <span>
+                      {t("projects.progress", { count: summary.progress })}
+                    </span>
+                    <div className="nav-progress">
+                      <i style={{ width: `${summary.progress}%` }} />
+                    </div>
+                  </div>
+                  <button
+                    className="project-open"
+                    onClick={() =>
+                      router.push(`/projects/${summary.id}/sources`)
+                    }
+                  >
+                    {t("projects.openProject")}
+                    <ArrowRight size={16} />
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-step projects-empty">
+            <span className="empty-step-icon">
+              <FolderPlus />
+            </span>
+            <h3>{t("projects.noProjects")}</h3>
+            <p>{t("projects.noProjectsCopy")}</p>
+          </div>
+        )}
+      </section>
 
-    {createOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="create-project-title"><button className="modal-backdrop" aria-label={t("common.close")} onClick={() => setCreateOpen(false)}/><section className="modal-card project-form"><header><div><span className="eyebrow">{t("projects.newProject")}</span><h2 id="create-project-title">{t("projects.emptyTitle")}</h2></div><button className="btn btn-ghost" aria-label={t("common.close")} onClick={() => setCreateOpen(false)}><X/></button></header><div className="form-grid"><label className="wide"><span>{t("projects.name")}</span><input autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}/></label><label><span>{t("projects.clientOptional")}</span><input value={form.clientName} onChange={(event) => setForm({ ...form, clientName: event.target.value })}/></label><label><span>{t("projects.sectorOptional")}</span><input value={form.sector} onChange={(event) => setForm({ ...form, sector: event.target.value })}/></label><label><span>{t("projects.projectLanguage")}</span><select value={form.projectLanguage} onChange={(event) => setForm({ ...form, projectLanguage: event.target.value })}><option value="auto">{t("common.automatic")}</option><option value="fr">{t("common.french")}</option><option value="en">{t("common.english")}</option></select></label><label><span>{t("projects.clientLanguage")}</span><select value={form.clientOutputLanguage} onChange={(event) => setForm({ ...form, clientOutputLanguage: event.target.value })}><option value="same_as_project">{t("common.sameAsProject")}</option><option value="fr">{t("common.french")}</option><option value="en">{t("common.english")}</option></select></label><label><span>{t("projects.estimationUnit")}</span><select value={form.estimationUnit} onChange={(event) => setForm({ ...form, estimationUnit: event.target.value as "day" | "hour" })}><option value="day">{t("common.days")}</option><option value="hour">{t("common.hours")}</option></select></label><label><span>{t("projects.currency")}</span><select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option>EUR</option><option>USD</option><option>GBP</option><option>MAD</option></select></label><label className="wide"><span>{t("projects.contingency")}</span><select value={form.contingencyRate} onChange={(event) => setForm({ ...form, contingencyRate: Number(event.target.value) })}><option value={0.1}>10%</option><option value={0.15}>15%</option><option value={0.2}>20%</option></select></label></div><footer><button className="btn" onClick={() => setCreateOpen(false)}>{t("common.cancel")}</button><button className="btn btn-primary" disabled={!form.name.trim()} onClick={create}>{t("common.create")}</button></footer></section></div>}
-    {deleteTarget && <div className="modal-layer" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><button className="modal-backdrop" aria-label={t("common.close")} onClick={() => setDeleteTarget(undefined)}/><section className="modal-card confirm-card"><h2 id="delete-title">{t("projects.deleteProject")}</h2><p>{t("projects.deleteConfirm", { name: deleteTarget.project.name })}</p><footer><button className="btn" onClick={() => setDeleteTarget(undefined)}>{t("common.cancel")}</button><button className="btn btn-danger" onClick={() => { projectRepository.remove(deleteTarget.project.id); setDeleteTarget(undefined); refresh(); }}>{t("common.delete")}</button></footer></section></div>}
-  </main>;
+      <Modal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        eyebrow={t("projects.newProject")}
+        title={t("projects.emptyTitle")}
+        closeLabel={t("common.close")}
+        footer={
+          <>
+            <button className="btn" onClick={() => setCreateOpen(false)}>
+              {t("common.cancel")}
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={!form.name.trim()}
+              onClick={create}
+            >
+              {t("common.create")}
+            </button>
+          </>
+        }
+      >
+        <div className="form-grid">
+          <label className="field wide">
+            <span className="field-label">{t("projects.name")}</span>
+            <input
+              autoFocus
+              value={form.name}
+              onChange={(event) =>
+                setForm({ ...form, name: event.target.value })
+              }
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">{t("projects.clientOptional")}</span>
+            <input
+              value={form.clientName}
+              onChange={(event) =>
+                setForm({ ...form, clientName: event.target.value })
+              }
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">{t("projects.sectorOptional")}</span>
+            <input
+              value={form.sector}
+              onChange={(event) =>
+                setForm({ ...form, sector: event.target.value })
+              }
+            />
+          </label>
+          <SelectField
+            label={t("projects.projectLanguage")}
+            value={form.projectLanguage}
+            onValueChange={(value) =>
+              setForm({ ...form, projectLanguage: value })
+            }
+            options={[
+              { value: "auto", label: t("common.automatic") },
+              { value: "fr", label: t("common.french") },
+              { value: "en", label: t("common.english") },
+            ]}
+          />
+          <SelectField
+            label={t("projects.clientLanguage")}
+            value={form.clientOutputLanguage}
+            onValueChange={(value) =>
+              setForm({ ...form, clientOutputLanguage: value })
+            }
+            options={[
+              { value: "same_as_project", label: t("common.sameAsProject") },
+              { value: "fr", label: t("common.french") },
+              { value: "en", label: t("common.english") },
+            ]}
+          />
+          <SelectField
+            label={t("projects.estimationUnit")}
+            value={form.estimationUnit}
+            onValueChange={(value) =>
+              setForm({ ...form, estimationUnit: value as "day" | "hour" })
+            }
+            options={[
+              { value: "day", label: t("common.days") },
+              { value: "hour", label: t("common.hours") },
+            ]}
+          />
+          <SelectField
+            label={t("projects.currency")}
+            value={form.currency}
+            onValueChange={(value) => setForm({ ...form, currency: value })}
+            options={["EUR", "USD", "GBP", "MAD"].map((value) => ({
+              value,
+              label: value,
+            }))}
+          />
+          <SelectField
+            className="wide"
+            label={t("projects.contingency")}
+            value={String(form.contingencyRate)}
+            onValueChange={(value) =>
+              setForm({ ...form, contingencyRate: Number(value) })
+            }
+            options={[
+              { value: "0.1", label: "10%" },
+              { value: "0.15", label: "15%" },
+              { value: "0.2", label: "20%" },
+            ]}
+          />
+        </div>
+      </Modal>
+      <Modal
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(undefined)}
+        destructive
+        title={t("projects.deleteProject")}
+        description={
+          deleteTarget
+            ? t("projects.deleteConfirm", { name: deleteTarget.project.name })
+            : undefined
+        }
+        closeLabel={t("common.close")}
+        footer={
+          <>
+            <button className="btn" onClick={() => setDeleteTarget(undefined)}>
+              {t("common.cancel")}
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={() => {
+                if (deleteTarget)
+                  projectRepository.remove(deleteTarget.project.id);
+                setDeleteTarget(undefined);
+                refresh();
+              }}
+            >
+              {t("common.delete")}
+            </button>
+          </>
+        }
+      />
+    </main>
+  );
 }

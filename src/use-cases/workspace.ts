@@ -5,7 +5,7 @@ export function answerQuestion(state: WorkspaceState, questionId: string, answer
   const question = state.questions.find((item) => item.id === questionId);
   if (!question || !answer.trim()) return state;
   const decision: Decision = { id: `D-${Date.now()}`, sourceQuestionId: questionId, statement: answer.trim(), kind: "client_answer", createdAt: new Date().toISOString() };
-  return { ...state, project: { ...state.project, status: "clarifying" }, questions: state.questions.map((item) => item.id === questionId ? { ...item, status: "answered", answer: answer.trim() } : item), decisions: [...state.decisions, decision], activity: addActivity(state, "Clarification recorded as a decision", "decision", null, answer.trim()) };
+  return { ...state, project: { ...state.project, status: "scope_ready" }, questions: state.questions.map((item) => item.id === questionId ? { ...item, status: "answered", answer: answer.trim() } : item), decisions: [...state.decisions, decision], activity: addActivity(state, "Clarification recorded as a decision", "decision", null, answer.trim()) };
 }
 
 export function updateQuestionStatus(state: WorkspaceState, questionId: string, status: Question["status"]): WorkspaceState {

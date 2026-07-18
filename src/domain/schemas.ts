@@ -37,6 +37,96 @@ export const InconsistencySchema = z.object({
   resolution: z.string().nullable(),
 });
 
+export const ProvenanceKindSchema = z.enum([
+  "project_source",
+  "user_decision",
+  "estimation_method",
+  "reference_case",
+  "ai_inference",
+  "system_calculation",
+]);
+
+export const EstimationMethodSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  primaryUnit: z.enum(["person_days", "hours", "fixed_price", "hybrid"]),
+  workstreams: z.array(z.string()),
+  roles: z.array(z.string()),
+  referenceRate: z.number().nonnegative().nullable(),
+  reserveRate: z.number().min(0).max(1),
+  rounding: z.enum(["0.5", "1", "5"]),
+  lowFactor: z.number().positive(),
+  highFactor: z.number().positive(),
+  assumptions: z.array(z.string()),
+  includedPatterns: z.array(z.string()),
+  optionalPatterns: z.array(z.string()),
+  excludedPatterns: z.array(z.string()),
+  language: z.string(),
+  status: z.enum(["active", "archived"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const ReferenceEstimateSchema = z.object({
+  workstream: z.string(),
+  low: z.number().nonnegative(),
+  likely: z.number().nonnegative(),
+  high: z.number().nonnegative(),
+  unit: z.enum(["person_days", "hours", "fixed_price", "hybrid"]),
+});
+
+export const ReferenceCaseSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  projectType: z.string(),
+  sector: z.string(),
+  summary: z.string(),
+  features: z.array(z.string()),
+  constraints: z.array(z.string()),
+  assumptions: z.array(z.string()),
+  estimates: z.array(ReferenceEstimateSchema),
+  methodId: z.string(),
+  decisions: z.array(z.string()),
+  outcomes: z.array(z.string()),
+  tags: z.array(z.string()),
+  language: z.string(),
+  date: z.string(),
+  provenance: z.enum(["reference_case", "user_decision"]),
+  status: z.enum(["active", "archived"]),
+});
+
+export const ReferenceMatchSchema = z.object({
+  referenceId: z.string(),
+  score: z.number().min(0).max(100),
+  commonCriteria: z.array(z.string()),
+  importantDifferences: z.array(z.string()),
+  reusableLearning: z.array(z.string()),
+  doNotTransfer: z.array(z.string()),
+  explanation: z.string(),
+});
+
+export const ReferenceInfluenceSchema = z.object({
+  id: z.string(),
+  referenceId: z.string(),
+  area: z.enum(["analysis", "scope", "estimate"]),
+  statement: z.string(),
+  provenance: z.literal("reference_case"),
+  confidence: z.enum(["high", "medium", "low"]),
+});
+
+export const EstimationComparisonSchema = z.object({
+  referenceId: z.string(),
+  commonWorkstreams: z.array(z.string()),
+  currentOnlyWorkstreams: z.array(z.string()),
+  referenceOnlyWorkstreams: z.array(z.string()),
+  currentTotals: z.object({ low: z.number(), likely: z.number(), high: z.number() }),
+  referenceTotals: z.object({ low: z.number(), likely: z.number(), high: z.number() }),
+  differences: z.array(z.string()),
+  methodDifference: z.string().nullable(),
+  riskNotes: z.array(z.string()),
+});
+
 export const ProjectAnalysisSchema = z.object({
   executiveSummary: z.string(),
   coverageScore: z.number().min(0).max(100),
@@ -45,6 +135,7 @@ export const ProjectAnalysisSchema = z.object({
   duplicatesMerged: z.array(z.object({ statement: z.string(), citationCount: z.number().int().positive() })),
   inconsistencies: z.array(InconsistencySchema),
   suggestedNextStep: z.string(),
+  referenceInfluences: z.array(ReferenceInfluenceSchema),
 });
 
 export const QuestionSchema = z.object({
@@ -111,8 +202,15 @@ export type ScopeModule = z.infer<typeof ScopeModuleSchema>;
 export type Workstream = z.infer<typeof WorkstreamSchema>;
 export type EstimateLine = z.infer<typeof EstimateLineSchema>;
 export type ChangeProposal = z.infer<typeof ChangeProposalSchema>;
+export type ProvenanceKind = z.infer<typeof ProvenanceKindSchema>;
+export type EstimationMethod = z.infer<typeof EstimationMethodSchema>;
+export type ReferenceEstimate = z.infer<typeof ReferenceEstimateSchema>;
+export type ReferenceCase = z.infer<typeof ReferenceCaseSchema>;
+export type ReferenceMatch = z.infer<typeof ReferenceMatchSchema>;
+export type ReferenceInfluence = z.infer<typeof ReferenceInfluenceSchema>;
+export type EstimationComparison = z.infer<typeof EstimationComparisonSchema>;
 
-export type SourceParagraph = { id: string; text: string };
+export type SourceParagraph = { id: string; text: string; page?: number };
 export type SourceLanguage = {
   detectedLocale: string | null;
   confidence: number | null;
@@ -123,11 +221,20 @@ export type SourceLanguage = {
 export type ProjectSource = {
   id: string;
   title: string;
-  kind: "pasted_text" | "markdown";
+  kind: "pasted_text" | "markdown" | "pdf" | "docx";
   origin: string;
   content: string;
   paragraphs: SourceParagraph[];
   language: SourceLanguage;
+  document?: {
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    pages: number | null;
+    sections: number | null;
+    checksum: string;
+    importedAt: string;
+  };
 };
 export type Decision = {
   id: string;
@@ -136,7 +243,16 @@ export type Decision = {
   kind: "client_answer" | "internal_assumption" | "manual_override";
   createdAt: string;
 };
-export type ProjectStatus = "draft" | "sources_ready" | "analyzed" | "clarifying" | "scoped" | "estimated" | "ready_to_export";
+export type ProjectStatus =
+  | "draft"
+  | "analyzing"
+  | "scope_ready"
+  | "estimate_ready"
+  | "in_review"
+  | "internally_approved"
+  | "proposal_ready"
+  | "archived";
+export type ProjectMode = "live" | "demo";
 export type ProjectLanguage = "auto" | "en" | "fr" | (string & {});
 export type ClientOutputLanguage = "same_as_project" | "en" | "fr" | (string & {});
 export type DeliverableType = "internal_estimate" | "client_summary" | "commercial_proposal" | "functional_appendix" | "raw_export";
@@ -149,13 +265,51 @@ export type EstimationPreferences = {
   commercialModel: "fixed_price" | "time_and_materials";
   deliverableType: DeliverableType;
 };
+export type EstimationMethodOverrides = Partial<Pick<EstimationMethod, "primaryUnit" | "referenceRate" | "reserveRate" | "rounding" | "lowFactor" | "highFactor">>;
 export type Activity = { id: string; label: string; createdAt: string; kind?: "decision" | "language" | "estimate" | "ai_proposal" | "export" | "project" | "source"; before?: string | null; after?: string | null };
-export type AIExecution = { mode: "openai" | "demo_fallback"; model: string };
-export type AnalysisVersion = { id: string; locale: string; analysis: ProjectAnalysis; createdAt: string };
+export type AIAction = "analysis" | "questions" | "scope" | "estimate" | "review";
+export type AiExecutionMode = "live" | "demo_precomputed" | "not_configured" | "requesting" | "error";
+export type AiExecutionMetadata = {
+  executionMode: "live" | "demo_precomputed";
+  model: string | null;
+  generatedAt: string;
+  promptVersion: string;
+  sourceChecksum: string;
+  requestId?: string | null;
+};
+export type AIExecution = AiExecutionMetadata & { action: AIAction };
+export type AnalysisVersion = { id: string; locale: string; analysis: ProjectAnalysis; execution?: AiExecutionMetadata; createdAt: string };
+export type EstimateTotalsSnapshot = {
+  base: { low: number; likely: number; high: number };
+  reserve: { low: number; likely: number; high: number };
+  proposed: { low: number; likely: number; high: number };
+  options: { low: number; likely: number; high: number };
+};
+export type EstimateSnapshot = {
+  id: string;
+  createdAt: string;
+  author: string;
+  methodId: string | null;
+  methodOverrides: EstimationMethodOverrides;
+  totals: EstimateTotalsSnapshot;
+  estimateLines: EstimateLine[];
+  assumptions: string[];
+  decisions: Decision[];
+  sourceVersions: Array<{ sourceId: string; checksum: string }>;
+  sourceChecksum: string;
+  revision: number;
+};
+export type ProposalSnapshot = {
+  id: string;
+  estimateSnapshotId: string;
+  generatedAt: string;
+  clientOutputLanguage: string;
+};
 
 export type WorkspaceState = {
   project: {
     id: string;
+    mode: ProjectMode;
     name: string;
     clientName: string;
     sector: string;
@@ -172,6 +326,8 @@ export type WorkspaceState = {
     createdAt: string;
     updatedAt: string;
     archivedAt: string | null;
+    estimationMethodId: string | null;
+    estimationMethodOverrides: EstimationMethodOverrides;
   };
   sources: ProjectSource[];
   analysis?: ProjectAnalysis;
@@ -183,4 +339,13 @@ export type WorkspaceState = {
   activity: Activity[];
   analysisVersions: AnalysisVersion[];
   aiExecution?: AIExecution;
+  aiExecutions: Partial<Record<AIAction, AiExecutionMetadata>>;
+  referenceCaseIds: string[];
+  referenceMatches: ReferenceMatch[];
+  referenceInfluences: ReferenceInfluence[];
+  estimationComparison?: EstimationComparison;
+  estimateSnapshots: EstimateSnapshot[];
+  approvedEstimateSnapshotId: string | null;
+  proposalSnapshot: ProposalSnapshot | null;
+  acknowledgedValidationWarnings: string[];
 };
