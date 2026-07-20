@@ -468,6 +468,7 @@ export const fr = {
     baseHigh: "Base haute",
     proposedLikelyTotal: "Réaliste avec réserve",
     estimateReserve: "Réserve d’estimation",
+    reserveHelp: "Saisissez une valeur de 0 à 100 %. Utilisez 0 % pour ne pas appliquer de réserve.",
     edited: "modifié",
     review: "Examiner {name}",
     preferenceTitle: "Préférences d’estimation",
@@ -731,6 +732,7 @@ export const fr = {
     technical: "Détail technique",
     retry: "Réessayer",
     invalidRange: "Les valeurs doivent respecter basse ≤ réaliste ≤ haute.",
+    invalidReserve: "La réserve doit être comprise entre 0 et 100 %.",
     invalidProposalRange:
       "Les valeurs proposées doivent respecter basse ≤ réaliste ≤ haute.",
     projectRequired: "Le nom du projet est obligatoire.",

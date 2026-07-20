@@ -42,6 +42,7 @@ import { resolvedClientLanguage } from "@/infrastructure/project-repository";
 import { BrandLogo } from "@/ui/brand-logo";
 import { createXlsxWorkbook } from "@/infrastructure/xlsx-export";
 import { SelectField } from "./primitives/select-field";
+import { PercentageField } from "./primitives/percentage-field";
 import { Drawer } from "./primitives/drawer";
 import { useWorkspace } from "./workspace-provider";
 
@@ -1465,18 +1466,14 @@ function EstimateScreen() {
         <Total label={t("estimate.baseLow")} value={totals.base.low} />
         <Total label={t("estimate.baseLikely")} value={totals.base.likely} />
         <Total label={t("estimate.baseHigh")} value={totals.base.high} />
-        <SelectField
-          className="reserve-select"
+        <PercentageField
           label={t("common.reserve")}
           ariaLabel={t("estimate.estimateReserve")}
-          size="compact"
-          value={String(state.project.contingencyRate)}
-          onValueChange={(value) => setContingency(Number(value))}
-          options={[
-            { value: "0.1", label: "10%" },
-            { value: "0.15", label: "15%" },
-            { value: "0.2", label: "20%" },
-          ]}
+          help={t("estimate.reserveHelp")}
+          compact
+          disabled={Boolean(state.approvedEstimateSnapshotId)}
+          value={state.project.contingencyRate}
+          onValueChange={setContingency}
         />
         <Total
           label={t("estimate.proposedLikelyTotal")}

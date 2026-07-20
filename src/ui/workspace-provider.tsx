@@ -915,17 +915,25 @@ export function WorkspaceProvider({
           setError(t("errors.estimateLocked"));
           return;
         }
-        setState((current) => ({
-          ...current,
-          project: { ...current.project, contingencyRate: rate, estimationMethodOverrides: { ...current.project.estimationMethodOverrides, reserveRate: rate } },
-          activity: addActivity(
-            current,
-            t("decisions.reserveChanged"),
-            "estimate",
-            String(current.project.contingencyRate),
-            String(rate),
-          ),
-        }));
+        if (!Number.isFinite(rate) || rate < 0 || rate > 1) {
+          setError(t("errors.invalidReserve"));
+          return;
+        }
+        setError(undefined);
+        setState((current) => {
+          if (current.project.contingencyRate === rate) return current;
+          return {
+            ...current,
+            project: { ...current.project, contingencyRate: rate, estimationMethodOverrides: { ...current.project.estimationMethodOverrides, reserveRate: rate } },
+            activity: addActivity(
+              current,
+              t("decisions.reserveChanged"),
+              "estimate",
+              String(current.project.contingencyRate),
+              String(rate),
+            ),
+          };
+        });
       },
       updateAnalysisSummary: (summary) =>
         setState((current) => {

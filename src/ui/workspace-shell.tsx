@@ -25,6 +25,7 @@ import { createAnonymizedDiagnosticReport } from "@/infrastructure/local-diagnos
 import { BrandLogo } from "./brand-logo";
 import { Drawer } from "./primitives/drawer";
 import { SelectField } from "./primitives/select-field";
+import { PercentageField } from "./primitives/percentage-field";
 import { DemoTour, demoTourStorageKey } from "./demo-tour";
 import { useWorkspace } from "./workspace-provider";
 
@@ -59,6 +60,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
     setEstimationMethod,
     toggleReference,
     compareWithReference,
+    setContingency,
     resetMethodOverrides,
     readiness,
     acknowledgeValidationWarning,
@@ -601,6 +603,13 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
                 value,
                 label: value,
               }))}
+            />
+            <PercentageField
+              label={t("estimate.estimateReserve")}
+              help={t("estimate.reserveHelp")}
+              disabled={Boolean(state.approvedEstimateSnapshotId)}
+              value={state.project.contingencyRate}
+              onValueChange={setContingency}
             />
             <label className="field">
               <span className="field-label">{t("estimate.teamSize")}</span>

@@ -5864,15 +5864,68 @@ select:focus-visible {
 .source-language-select {
   min-width: min(240px, 100%);
 }
-.reserve-select {
-  align-self: center;
+.percentage-field {
+  min-width: 0;
 }
-.reserve-select .select-trigger {
-  min-width: 96px;
-}
-.reserve-select .field-label {
+.percentage-field .field-label {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   font-weight: 560;
+}
+.percentage-control {
+  position: relative;
+  display: block;
+}
+.percentage-control input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0.55rem 2rem 0.55rem 0.7rem;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.72rem;
+  background: var(--paper);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.percentage-control input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  outline-offset: 2px;
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+}
+.percentage-control input:disabled {
+  color: var(--ink-subtle);
+  background: var(--surface-muted);
+  cursor: not-allowed;
+}
+.percentage-control > span {
+  position: absolute;
+  top: 50%;
+  right: 0.72rem;
+  color: var(--ink-subtle);
+  font-size: 0.76rem;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.percentage-field-compact {
+  align-self: end;
+}
+.percentage-field-compact .percentage-control {
+  width: 96px;
+}
+.percentage-field-compact .percentage-control input {
+  min-height: 36px;
+  padding-block: 0.4rem;
+  font-weight: 740;
+}
+.percentage-field-compact .field-help {
+  display: none;
+}
+.field-help {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--ink-subtle);
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.4;
 }
 .check-row,
 .switch-row {
