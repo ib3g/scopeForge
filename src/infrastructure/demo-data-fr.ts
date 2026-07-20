@@ -523,9 +523,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-01",
     "M-01",
-    4,
+    3,
+    5,
     7,
-    10,
     "high",
     "medium",
     "Trois publics et plusieurs parcours de demande nécessitent un cadrage initial.",
@@ -533,9 +533,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-02",
     "M-02",
+    5,
     7,
-    11,
-    16,
+    10,
     "high",
     "medium",
     "Filtres, gabarits éditoriaux, ressources et accessibilité.",
@@ -553,9 +553,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-04",
     "M-04",
-    7,
-    11,
-    17,
+    5,
+    8,
+    12,
     "medium",
     "high",
     "Compte, groupe, créneaux, consentement et données sensibles.",
@@ -563,9 +563,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-05",
     "M-05",
-    7,
+    5,
+    8,
     12,
-    18,
     "medium",
     "high",
     "États, échanges, décisions humaines et règles de capacité.",
@@ -573,9 +573,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-06",
     "M-06",
-    4,
-    7,
-    11,
+    3,
+    5,
+    8,
     "high",
     "medium",
     "Quatre modèles et suivi des événements de livraison.",
@@ -583,9 +583,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-07",
     "M-07",
-    8,
+    6,
+    9,
     13,
-    20,
     "medium",
     "high",
     "Rôles, exports sensibles et historique des changements.",
@@ -593,9 +593,9 @@ export const frenchDemoEstimateLines: EstimateLine[] = [
   [
     "E-08",
     "M-08",
+    4,
     6,
     9,
-    14,
     "medium",
     "medium",
     "Accessibilité, tests, déploiement, documentation et formation.",
@@ -622,8 +622,8 @@ export function makeFrenchDemoChangeProposal(
 ): ChangeProposal {
   const after = {
     ...line,
-    likely: line.likely + 2,
-    high: line.high + 3,
+    likely: line.likely + 1,
+    high: line.high + 2,
     rationale: `${line.rationale} La fourchette révisée rend explicites les cas d’erreur et les limites de permissions.`,
   };
   return {

@@ -309,4 +309,38 @@ describe("OpenAI live/demo boundary", () => {
     expect(serializedInput).not.toContain("sourceContributions");
     expect(serializedInput).not.toContain("duplicatesMerged");
   });
+
+  it("calibrates live estimates to the requested unit and avoids duplicated overhead", async () => {
+    const client = clientReturning({
+      lines: [
+        {
+          id: "E-1",
+          moduleId: "M-1",
+          low: 4,
+          likely: 6,
+          high: 9,
+          confidence: "medium",
+          risk: "medium",
+          rationale: "A focused catalogue module with no external integration.",
+          manualOverride: false,
+          updatedBy: "ai",
+        },
+      ],
+    });
+    await runStructuredAction(
+      "estimate",
+      {
+        workstreams: [],
+        sources: liveSources,
+        estimationUnit: "day",
+      },
+      { projectMode: "live", client },
+    );
+    const request = (client.responses.parse as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const userInput = request.input[1].content as string;
+    expect(userInput).toContain("20–40 person-days");
+    expect(userInput).toContain("do not add generic programme overhead to every module");
+    expect(userInput).toContain("project estimationUnit overrides");
+    expect(userInput).toContain('"estimationUnit":"day"');
+  });
 });
