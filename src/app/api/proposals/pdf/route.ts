@@ -19,11 +19,13 @@ export async function POST(request: Request) {
     const document = ClientDocumentSchema.parse(body.document);
     if (document.status !== "validated") return Response.json({ error: "Only validated client proposals can be exported" }, { status: 409 });
     const pdf = await renderToBuffer(ClientProposalPdf({ document }));
+    if (pdf.byteLength === 0) throw new Error("PDF generation returned an empty document");
     const filename = `${document.settings.reference || "scopeforge-proposal"}.pdf`.replace(/[^a-z0-9_.-]/gi, "-");
     return new Response(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="${filename}"`,
+        "Content-Length": String(pdf.byteLength),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
       },

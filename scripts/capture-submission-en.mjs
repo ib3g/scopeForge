@@ -1,7 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { mkdir, rm } from "node:fs/promises";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.SCOPEFORGE_URL ?? "http://127.0.0.1:3000";
@@ -43,44 +40,11 @@ const top = async () => {
 };
 
 const capturePdfPreview = async () => {
-  const frame = page.locator(".client-document-frame");
-  const pdfBase64 = await frame.evaluate(async (element) => {
-    const response = await fetch(element.src);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    let binary = "";
-    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-    }
-    return btoa(binary);
-  });
-  const pdf = Buffer.from(pdfBase64, "base64");
-  const standardFontDataUrl = `${resolve("node_modules/pdfjs-dist/standard_fonts")}/`;
-  const pdfDocument = await getDocument({ data: new Uint8Array(pdf), standardFontDataUrl }).promise;
-  const pdfPage = await pdfDocument.getPage(1);
-  const viewport = pdfPage.getViewport({ scale: 1.7 });
-  const renderedPage = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-  await pdfPage.render({ canvasContext: renderedPage.getContext("2d"), viewport }).promise;
-
-  const baseScreenshot = await page.screenshot({ type: "jpeg", quality: 91, fullPage: false });
-  const baseImage = await loadImage(baseScreenshot);
-  const finalCanvas = createCanvas(1500, 1000);
-  const context = finalCanvas.getContext("2d");
-  context.drawImage(baseImage, 0, 0, 1500, 1000);
-  const pageHeight = 850;
-  const pageWidth = Math.round(pageHeight * (viewport.width / viewport.height));
-  const pageX = Math.round((1500 - pageWidth) / 2);
-  const pageY = 96;
-  context.save();
-  context.shadowColor = "rgba(20, 28, 24, 0.18)";
-  context.shadowBlur = 22;
-  context.shadowOffsetY = 8;
-  context.fillStyle = "#ffffff";
-  context.fillRect(pageX, pageY, pageWidth, pageHeight);
-  context.restore();
-  context.drawImage(renderedPage, pageX, pageY, pageWidth, pageHeight);
   const output = `${outputDir}/15-client-pdf-deliverable.jpg`;
-  await writeFile(output, finalCanvas.toBuffer("image/jpeg", 91));
-  console.log(`captured 15-client-pdf-deliverable.jpg (${pdfDocument.numPages} PDF pages)`);
+  const pages = page.locator(".client-document-page");
+  await pages.first().waitFor({ timeout: 30_000 });
+  await page.screenshot({ path: output, type: "jpeg", quality: 91, fullPage: false });
+  console.log(`captured 15-client-pdf-deliverable.jpg (${await pages.count()} PDF pages)`);
 };
 
 try {
@@ -186,7 +150,7 @@ try {
 
   await page.getByRole("button", { name: /Open client PDF/i }).click();
   await page.waitForURL(/\/proposals\/[^/]+\/document/, { waitUntil: "commit" });
-  await page.locator(".client-document-frame").waitFor({ timeout: 30_000 });
+  await page.locator(".client-document-page").first().waitFor({ timeout: 30_000 });
   await page.waitForTimeout(1_200);
   await capturePdfPreview();
 
