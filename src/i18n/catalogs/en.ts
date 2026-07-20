@@ -730,6 +730,10 @@ export const en = {
       "OpenAI is not configured on the server. Add the key to .env.local, restart the app and retry.",
     aiRequestFailedDetails:
       "The OpenAI request failed. No demonstration result was added to this project.",
+    aiTimeoutDetails:
+      "OpenAI did not respond before the request timed out. Your project data was preserved. Retry when ready.",
+    aiInvalidResponseDetails:
+      "The response could not be validated. Your project data was preserved. Retry the operation.",
     invalidAIRequest: "The request is invalid.",
     aiResultStale: "This result was based on an older source version. Your current project was kept; run the operation again.",
     estimateLocked: "This estimate is approved. Create a new revision before editing it.",

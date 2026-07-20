@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -38,6 +38,13 @@ const schemas = {
   estimate: EstimateProposalSchema,
   review: ChangeProposalSchema,
 } as const;
+const actionLimits: Record<AIAction, number> = {
+  analysis: 7_000,
+  questions: 4_000,
+  scope: 6_500,
+  estimate: 6_500,
+  review: 3_000,
+};
 const prompts: Record<AIAction, string> = {
   analysis:
     "Analyze every supplied source into one structured project view. Treat compatible information as complementary by default. Merge semantic duplicates without losing citations. Distinguish confirmed facts, inferences, estimation assumptions and missing information. Report an inconsistency only when claims cannot coexist; an empty list is normal. Every material finding and contribution needs citations using supplied paragraph IDs. Set coverageScore to an integer percentage from 0 to 100: use 92 for 92%, never 0.92. Set resolution to null for unresolved inconsistencies. If estimationContext contains selected reference cases, add referenceInfluences only for concrete ways those cases informed a question, scope framing or estimate; never invent a requirement from a reference. Return an empty referenceInfluences array when no reference affected the analysis.",
@@ -143,6 +150,47 @@ export class AIConfigurationError extends Error {
   }
 }
 
+export class AITimeoutError extends Error {
+  readonly code = "AI_TIMEOUT";
+  constructor(readonly timeoutMs: number) {
+    super(`OpenAI did not respond within ${Math.round(timeoutMs / 1000)} seconds.`);
+    this.name = "AITimeoutError";
+  }
+}
+
+export class AIResponseValidationError extends Error {
+  readonly code = "AI_INVALID_RESPONSE";
+  constructor() {
+    super("OpenAI returned a response that could not be validated.");
+    this.name = "AIResponseValidationError";
+  }
+}
+
+function payloadForModel(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  if (!Array.isArray(record.sources)) return payload;
+  return {
+    ...record,
+    sources: record.sources.map((source) => {
+      if (!source || typeof source !== "object" || Array.isArray(source)) return source;
+      const { content: _duplicateContent, ...sourceWithoutDuplicateContent } = source as Record<string, unknown>;
+      void _duplicateContent;
+      return sourceWithoutDuplicateContent;
+    }),
+  };
+}
+
+function isTimeoutError(error: unknown) {
+  return error instanceof APIConnectionTimeoutError || error instanceof APIUserAbortError ||
+    (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name));
+}
+
+function isResponseValidationError(error: unknown) {
+  return error instanceof AIResponseValidationError || error instanceof z.ZodError ||
+    (error instanceof Error && error.message.startsWith("Unknown citation "));
+}
+
 export function getAIConfiguration() {
   const environment = getServerEnvironment();
   return {
@@ -206,6 +254,7 @@ export async function runStructuredAction(
   const environment = getServerEnvironment();
   const { configured, primaryModel: model } = getAIConfiguration();
   const checksum = sourceChecksum(payload);
+  const modelPayload = payloadForModel(payload);
   const usePrecomputed =
     options.projectMode === "demo" &&
     (environment.DEPLOYMENT_PROFILE === "public_demo" || environment.DEMO_MODE || !configured);
@@ -223,20 +272,24 @@ export async function runStructuredAction(
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
+      const requestTimeoutMs = attempt === 0
+        ? environment.AI_REQUEST_TIMEOUT_MS
+        : Math.min(environment.AI_REQUEST_TIMEOUT_MS, 30_000);
       const response = await client.responses.parse({
         model,
+        reasoning: { effort: "low" },
         input: [
           { role: "system", content: SYSTEM_PROMPT },
           {
             role: "user",
-            content: `${prompts[action]}\nUse languageContext.projectLanguage for every generated user-facing value. languageContext.interfaceLocale is UI context only and languageContext.clientOutputLanguage applies to client deliverables. Source language metadata is advisory; quoted excerpts must remain original.\n\n<untrusted_project_data>\n${JSON.stringify(payload)}\n</untrusted_project_data>${attempt ? "\nPrevious output failed validation. Return a corrected schema-valid result." : ""}`,
+            content: `${prompts[action]}\nUse languageContext.projectLanguage for every generated user-facing value. languageContext.interfaceLocale is UI context only and languageContext.clientOutputLanguage applies to client deliverables. Source language metadata is advisory; quoted excerpts must remain original.\n\n<untrusted_project_data>\n${JSON.stringify(modelPayload)}\n</untrusted_project_data>${attempt ? "\nPrevious output failed validation. Return a corrected schema-valid result." : ""}`,
           },
         ],
         text: { format: zodTextFormat(schema, `scopeforge_${action}`) },
-        max_output_tokens: 12000,
-      }, { signal: AbortSignal.timeout(environment.AI_REQUEST_TIMEOUT_MS) });
+        max_output_tokens: actionLimits[action],
+      }, { signal: AbortSignal.timeout(requestTimeoutMs) });
       if (!response.output_parsed)
-        throw new Error("Model returned no structured output");
+        throw new AIResponseValidationError();
       const data = action === "analysis"
         ? (() => {
             const analysis = ProjectAnalysisSchema.parse(response.output_parsed);
@@ -246,7 +299,7 @@ export async function runStructuredAction(
             };
           })()
         : response.output_parsed;
-      assertCitationProvenance(data, payload);
+      assertCitationProvenance(data, modelPayload);
       return {
         data,
         execution: executionMetadata(
@@ -258,10 +311,12 @@ export async function runStructuredAction(
         ),
       };
     } catch (error) {
+      if (isTimeoutError(error)) throw new AITimeoutError(environment.AI_REQUEST_TIMEOUT_MS);
+      if (!isResponseValidationError(error)) throw error;
       lastError = error;
     }
   }
-  throw lastError instanceof Error
+  throw lastError instanceof AIResponseValidationError
     ? lastError
-    : new Error("OpenAI structured output failed validation");
+    : new AIResponseValidationError();
 }

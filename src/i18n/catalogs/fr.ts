@@ -739,6 +739,10 @@ export const fr = {
       "OpenAI n’est pas configuré sur le serveur. Ajoutez la clé dans .env.local, redémarrez l’application, puis réessayez.",
     aiRequestFailedDetails:
       "L’appel à OpenAI a échoué. Aucun résultat de démonstration n’a été ajouté à ce projet.",
+    aiTimeoutDetails:
+      "OpenAI n’a pas répondu avant l’expiration du délai. Les données du projet sont conservées. Réessayez lorsque vous le souhaitez.",
+    aiInvalidResponseDetails:
+      "La réponse n’a pas pu être validée. Les données du projet sont conservées. Relancez l’opération.",
     invalidAIRequest: "La demande n’est pas valide.",
     aiResultStale: "Ce résultat repose sur une ancienne version des sources. Le projet actuel est conservé ; relancez l’opération.",
     estimateLocked: "Cette estimation est validée. Créez une nouvelle révision avant de la modifier.",

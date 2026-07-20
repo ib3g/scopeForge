@@ -1,8 +1,10 @@
-import type OpenAI from "openai";
+import { APIConnectionTimeoutError, type default as OpenAI } from "openai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectAnalysisSchema } from "@/domain/schemas";
 import {
   AIConfigurationError,
+  AIResponseValidationError,
+  AITimeoutError,
   getAIConfiguration,
   runStructuredAction,
 } from "./openai";
@@ -173,6 +175,8 @@ describe("OpenAI live/demo boundary", () => {
     expect(serializedInput).toContain("LIVE-SRC-01");
     expect(serializedInput).not.toContain("Morrow Ridge");
     expect(serializedInput).not.toContain("Calyra");
+    expect(request.reasoning).toEqual({ effort: "low" });
+    expect(request.max_output_tokens).toBe(7000);
     expect(result.execution).toMatchObject({
       executionMode: "live",
       model: "gpt-5.6",
@@ -207,5 +211,49 @@ describe("OpenAI live/demo boundary", () => {
         { projectMode: "live", client },
       ),
     ).rejects.toThrow("provider unavailable");
+    expect(client.responses.parse).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a timed-out provider request", async () => {
+    const client = {
+      responses: {
+        parse: vi.fn().mockRejectedValue(new APIConnectionTimeoutError()),
+      },
+    } as unknown as OpenAI;
+    await expect(
+      runStructuredAction(
+        "scope",
+        { sources: liveSources, decisions: [] },
+        { projectMode: "live", client },
+      ),
+    ).rejects.toBeInstanceOf(AITimeoutError);
+    expect(client.responses.parse).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries only a response validation failure", async () => {
+    const client = clientReturning(null);
+    await expect(
+      runStructuredAction(
+        "analysis",
+        { sources: liveSources },
+        { projectMode: "live", client },
+      ),
+    ).rejects.toBeInstanceOf(AIResponseValidationError);
+    expect(client.responses.parse).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not send duplicate full source content alongside paragraphs", async () => {
+    const client = clientReturning(liveAnalysis);
+    const sources = liveSources.map((source) => ({
+      ...source,
+      content: "DUPLICATE-FULL-SOURCE-CONTENT",
+    }));
+    await runStructuredAction(
+      "analysis",
+      { sources },
+      { projectMode: "live", client },
+    );
+    const request = (client.responses.parse as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(JSON.stringify(request.input)).not.toContain("DUPLICATE-FULL-SOURCE-CONTENT");
   });
 });

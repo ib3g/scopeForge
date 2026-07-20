@@ -435,6 +435,10 @@ export function WorkspaceProvider({
           const message =
             body?.code === "AI_NOT_CONFIGURED"
               ? t("errors.aiNotConfiguredDetails")
+              : body?.code === "AI_TIMEOUT"
+                ? t("errors.aiTimeoutDetails")
+                : body?.code === "AI_INVALID_RESPONSE"
+                  ? t("errors.aiInvalidResponseDetails")
               : body?.code === "INVALID_REQUEST"
                 ? t("errors.invalidAIRequest")
                 : t("errors.aiRequestFailedDetails");

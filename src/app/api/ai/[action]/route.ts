@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { AIConfigurationError, runStructuredAction, type AIAction } from "@/infrastructure/openai";
+import { AIConfigurationError, AIResponseValidationError, AITimeoutError, runStructuredAction, type AIAction } from "@/infrastructure/openai";
 import { getServerEnvironment, ServerEnvironmentError } from "@/infrastructure/server-env";
 
 const actions = new Set<AIAction>(["analysis", "questions", "scope", "estimate", "review"]);
@@ -8,6 +8,9 @@ const RequestSchema = z.object({
   projectMode: z.enum(["live", "demo"]),
   payload: z.record(z.string(), z.unknown()),
 });
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
 
 export async function POST(request: Request, { params }: { params: Promise<{ action: string }> }) {
   const { action } = await params;
@@ -27,6 +30,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   } catch (error) {
     if (error instanceof AIConfigurationError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 503 });
+    }
+    if (error instanceof AITimeoutError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 504 });
+    }
+    if (error instanceof AIResponseValidationError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 502 });
     }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Invalid AI request", code: "INVALID_REQUEST" }, { status: 400 });
