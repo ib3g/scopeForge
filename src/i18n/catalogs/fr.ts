@@ -224,6 +224,8 @@ export const fr = {
     fileSize: "{size} Ko",
     extractionWarning: "Avertissement d’extraction",
     extractionFailed: "Le document n’a pas pu être lu. Les sources existantes sont conservées.",
+    docxInvalid: "Ce fichier DOCX est incomplet, corrompu ou non pris en charge. Exportez-le à nouveau au format DOCX, puis réessayez.",
+    pdfWithoutText: "Ce PDF ne contient pas de texte sélectionnable. Les PDF scannés nécessitent un OCR, qui n’est pas encore pris en charge.",
     analyze: "Analyser les sources",
     analyzing: "Analyse des sources…",
     packageTitle: "Sources du projet · {name}",

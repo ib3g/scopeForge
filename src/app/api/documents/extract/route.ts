@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { extractDocument, type SupportedDocumentKind } from "@/infrastructure/document-extraction";
+import { DocumentExtractionError, extractDocument, type SupportedDocumentKind } from "@/infrastructure/document-extraction";
 import { getServerEnvironment, ServerEnvironmentError } from "@/infrastructure/server-env";
 
 const RequestSchema = z.object({
@@ -9,6 +9,9 @@ const RequestSchema = z.object({
   mimeType: z.string().max(120),
   data: z.string().min(1),
 });
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function kindFor(filename: string, mimeType: string): SupportedDocumentKind | null {
   const extension = filename.toLowerCase().split(".").pop();
@@ -42,12 +45,15 @@ export async function POST(request: Request) {
       ...extraction,
     });
   } catch (error) {
+    if (error instanceof DocumentExtractionError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 422 });
+    }
     const message = error instanceof ServerEnvironmentError
       ? "The server configuration is invalid."
       : error instanceof z.ZodError
         ? "Invalid document extraction request."
         : error instanceof Error
-          ? error.message
+          ? "Document extraction failed."
           : "Document extraction failed.";
     return NextResponse.json({ error: message }, { status: 400 });
   }

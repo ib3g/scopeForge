@@ -217,6 +217,8 @@ export const en = {
     fileSize: "{size} KB",
     extractionWarning: "Extraction warning",
     extractionFailed: "The document could not be read. Your existing sources were preserved.",
+    docxInvalid: "This DOCX file is incomplete, corrupted or unsupported. Export it again as DOCX, then retry.",
+    pdfWithoutText: "This PDF does not contain selectable text. Scanned PDFs require OCR and are not supported yet.",
     analyze: "Analyze sources",
     analyzing: "Analyzing sources…",
     packageTitle: "Project sources · {name}",

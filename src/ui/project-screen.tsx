@@ -240,9 +240,13 @@ function SourcesScreen() {
         body: JSON.stringify({ filename: file.name, mimeType: file.type, data: btoa(binary) }),
       });
       const body = (await response.json()) as {
-        filename?: string; mimeType?: string; sizeBytes?: number; checksum?: string; kind?: "text" | "markdown" | "pdf" | "docx"; content?: string; pages?: number | null; sections?: number | null; warnings?: string[]; error?: string;
+        filename?: string; mimeType?: string; sizeBytes?: number; checksum?: string; kind?: "text" | "markdown" | "pdf" | "docx"; content?: string; pages?: number | null; sections?: number | null; warnings?: string[]; error?: string; code?: string;
       };
-      if (!response.ok || !body.content || !body.kind || !body.checksum) throw new Error(body.error ?? t("sources.extractionFailed"));
+      if (!response.ok || !body.content || !body.kind || !body.checksum) {
+        if (body.code === "INVALID_DOCX") throw new Error(t("sources.docxInvalid"));
+        if (body.code === "PDF_WITHOUT_TEXT") throw new Error(t("sources.pdfWithoutText"));
+        throw new Error(t("sources.extractionFailed"));
+      }
       setPendingDocument({
         filename: body.filename ?? file.name,
         title: file.name.replace(/\.(markdown|md|txt|pdf|docx)$/i, ""),
