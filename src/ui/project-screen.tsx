@@ -1,7 +1,7 @@
 "use client";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   GitCompare,
+  Info,
   ListChecks,
   MessageSquareText,
   MoreHorizontal,
@@ -24,16 +25,22 @@ import {
   X,
 } from "lucide-react";
 import { calculateTotals } from "@/domain/estimation";
+import { compareEstimateRevisions } from "@/domain/estimate-revisions";
 import { sourceLocale, wordCount } from "@/domain/source";
 import { detectSourceLanguage } from "@/domain/language";
+import { normalizeCoverageScore } from "@/domain/schemas";
 import type {
   Citation,
+  ClientProposalSettings,
   EstimateLine,
   Question,
   ScopeModule,
 } from "@/domain/schemas";
+import { defaultClientProposalSettings } from "@/domain/client-document";
 import { formatDateFor, translate, useI18n } from "@/i18n";
 import { resolvedClientLanguage } from "@/infrastructure/project-repository";
+import { BrandLogo } from "@/ui/brand-logo";
+import { createXlsxWorkbook } from "@/infrastructure/xlsx-export";
 import { SelectField } from "./primitives/select-field";
 import { Drawer } from "./primitives/drawer";
 import { useWorkspace } from "./workspace-provider";
@@ -66,6 +73,42 @@ function PageHeader({
         <p>{copy}</p>
       </div>
       {action}
+    </div>
+  );
+}
+
+function InlineHelp({ label, children }: { label: string; children: React.ReactNode }) {
+  const id = useId();
+  return (
+    <span className="tooltip inline-help">
+      <button type="button" className="inline-help-trigger" aria-label={label} aria-describedby={id}>
+        <Info size={13} aria-hidden="true" />
+      </button>
+      <span id={id} role="tooltip">{children}</span>
+    </span>
+  );
+}
+
+function ProposalToggle({
+  checked,
+  disabled,
+  label,
+  help,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  help: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className={`proposal-toggle${disabled ? " is-disabled" : ""}`}>
+      <label className="check-row">
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+        <span>{label}</span>
+      </label>
+      <InlineHelp label={`${label}: ${help}`}>{help}</InlineHelp>
     </div>
   );
 }
@@ -564,7 +607,7 @@ function AnalysisScreen() {
       <ErrorBanner />
       <div className="card analysis-summary">
         <div>
-          <div className="mono">{number(analysis.coverageScore)}%</div>
+          <div className="mono">{number(normalizeCoverageScore(analysis.coverageScore))}%</div>
           <span className="muted">{t("analysis.coverage")}</span>
         </div>
         <div>
@@ -1046,6 +1089,7 @@ function EstimateScreen() {
     acknowledgeValidationWarning,
     approveEstimate,
     createEstimateRevision,
+    restoreEstimateRevision,
     references,
     saveEstimateAsReference,
   } = useWorkspace();
@@ -1182,6 +1226,11 @@ function EstimateScreen() {
         acknowledgeWarning={acknowledgeValidationWarning}
         approve={approveEstimate}
         createRevision={createEstimateRevision}
+      />
+      <RevisionHistory
+        snapshots={state.estimateSnapshots}
+        approvedId={state.approvedEstimateSnapshotId}
+        restore={restoreEstimateRevision}
       />
       <div className="estimate-toolbar card">
         <label>
@@ -1526,6 +1575,86 @@ function EstimateApprovalPanel({
   );
 }
 
+function RevisionHistory({
+  snapshots,
+  approvedId,
+  restore,
+}: {
+  snapshots: ReturnType<typeof useWorkspace>["state"]["estimateSnapshots"];
+  approvedId: string | null;
+  restore: ReturnType<typeof useWorkspace>["restoreEstimateRevision"];
+}) {
+  const { t, date, number } = useI18n();
+  const ordered = [...snapshots].sort((left, right) => right.revision - left.revision);
+  const [beforeId, setBeforeId] = useState(ordered[1]?.id ?? ordered[0]?.id ?? "");
+  const [afterId, setAfterId] = useState(approvedId ?? ordered[0]?.id ?? "");
+  const [comparison, setComparison] = useState<ReturnType<typeof compareEstimateRevisions>>();
+  if (!ordered.length) return null;
+  const before = snapshots.find((snapshot) => snapshot.id === beforeId);
+  const after = snapshots.find((snapshot) => snapshot.id === afterId);
+  const compare = () => {
+    if (before && after && before.id !== after.id) setComparison(compareEstimateRevisions(before, after));
+  };
+  return (
+    <section className="card revision-history-panel">
+      <div className="section-heading compact">
+        <div>
+          <span className="eyebrow">{t("estimate.revisionsEyebrow")}</span>
+          <h2>{t("estimate.revisionsTitle")}</h2>
+          <p className="muted">{t("estimate.revisionsCopy")}</p>
+        </div>
+        <span className="badge badge-muted">{ordered.length}</span>
+      </div>
+      <div className="revision-list">
+        {ordered.map((snapshot) => (
+          <div className="revision-row" key={snapshot.id}>
+            <div>
+              <strong>{t("estimate.revisionLabel", { revision: snapshot.revision })}</strong>
+              <span>{date(snapshot.createdAt, { dateStyle: "medium", timeStyle: "short" })} · {t(`estimate.revisionStatus.${snapshot.status}`)}</span>
+            </div>
+            <div className="revision-row-total">
+              <strong>{number(snapshot.totals.proposed.likely, { maximumFractionDigits: 1 })}</strong>
+              <span>{t("common.dayHourShort")} · {snapshot.author}</span>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => {
+              if (window.confirm(t("estimate.restoreConfirm", { revision: snapshot.revision }))) restore(snapshot.id);
+            }}>{t("estimate.restoreRevision")}</button>
+          </div>
+        ))}
+      </div>
+      {ordered.length > 1 && (
+        <div className="revision-compare-controls">
+          <SelectField label={t("estimate.compareFrom")} value={beforeId} onValueChange={setBeforeId} options={ordered.map((snapshot) => ({ value: snapshot.id, label: t("estimate.revisionLabel", { revision: snapshot.revision }) }))} />
+          <SelectField label={t("estimate.compareTo")} value={afterId} onValueChange={setAfterId} options={ordered.map((snapshot) => ({ value: snapshot.id, label: t("estimate.revisionLabel", { revision: snapshot.revision }) }))} />
+          <button className="btn btn-secondary" disabled={!before || !after || before.id === after.id} onClick={compare}>{t("estimate.compareRevisions")}</button>
+        </div>
+      )}
+      {comparison && (
+        <div className="revision-comparison-result">
+          <div className="revision-comparison-summary">
+            <strong>{t("estimate.comparisonSummary", { before: comparison.beforeRevision, after: comparison.afterRevision })}</strong>
+            <span>{t("estimate.comparisonTotals", { delta: number(comparison.totals.likely, { maximumFractionDigits: 1 }) })}</span>
+          </div>
+          <div className="revision-comparison-grid">
+            <span>{t("estimate.addedLines")} <strong>{comparison.addedLines}</strong></span>
+            <span>{t("estimate.modifiedLines")} <strong>{comparison.modifiedLines}</strong></span>
+            <span>{t("estimate.removedLines")} <strong>{comparison.removedLines}</strong></span>
+            <span>{t("estimate.methodChanged")} <strong>{comparison.methodChanged ? t("common.yes") : t("common.no")}</strong></span>
+          </div>
+          <div className="revision-change-list">
+            {comparison.lineChanges.map((change) => (
+              <div key={change.moduleId} className="revision-change-row">
+                <strong>{change.moduleName}</strong>
+                <span>{t(`estimate.change.${change.kind}`)} · {change.before ? `${change.before.likely} → ` : ""}{change.after?.likely ?? "—"} {t("common.likely")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ScopeCards({
   workstreams,
   changeStatus,
@@ -1793,9 +1922,12 @@ function PreviewScreen() {
     recordExport,
     generateClientProposal,
     updateAnalysisSummary,
+    updateProposalSettings,
+    selectedMethod,
     readiness,
   } = useWorkspace();
   const { t, locale } = useI18n();
+  const router = useRouter();
   const [mode, setMode] = useState<"internal" | "client">("internal");
   const modules = state.workstreams.flatMap((w) => w.modules);
   const totals = useMemo(
@@ -1827,62 +1959,35 @@ function PreviewScreen() {
   const optional = modules.filter((module) => module.status === "optional");
   const excluded = modules.filter((module) => module.status === "excluded");
   const clientLocale = resolvedClientLanguage(state);
+  const proposalSettings: ClientProposalSettings = {
+    ...defaultClientProposalSettings(state),
+    ...(state.proposalSettings ?? {}),
+  };
+  const proposalSettingsChanged = Boolean(
+    state.proposalSnapshot?.settings &&
+      JSON.stringify(state.proposalSnapshot.settings) !== JSON.stringify(proposalSettings),
+  );
   const pt = (key: string, values?: Record<string, string | number>) =>
     mode === "client" ? translate(clientLocale, key, values) : t(key, values);
   const unit =
     state.project.estimationUnit === "day"
       ? pt("common.days")
       : pt("common.hours");
-  const exportCsv = () => {
-    const escape = (value: string | number | boolean) =>
-      `"${String(value).replaceAll('"', '""')}"`;
-    const header = [
-      translate(clientLocale, "common.workstream"),
-      translate(clientLocale, "common.modules"),
-      translate(clientLocale, "common.status"),
-      translate(clientLocale, "common.low"),
-      translate(clientLocale, "common.likely"),
-      translate(clientLocale, "common.high"),
-      translate(clientLocale, "common.risk"),
-      translate(clientLocale, "common.confidence"),
-      translate(clientLocale, "common.manualOverride"),
-      clientLocale === "fr" ? "Références source" : "Source references",
-    ];
-    const rows = state.workstreams.flatMap((workstream) =>
-      workstream.modules.map((module) => {
-        const line = state.estimateLines.find(
-          (item) => item.moduleId === module.id,
-        );
-        return [
-          workstream.name,
-          module.name,
-          translate(clientLocale, `common.${module.status}`),
-          line?.low ?? 0,
-          line?.likely ?? 0,
-          line?.high ?? 0,
-          line?.risk ? translate(clientLocale, `common.${line.risk}`) : "",
-          line?.confidence
-            ? translate(clientLocale, `common.${line.confidence}`)
-            : "",
-          line?.manualOverride ?? false,
-          module.citations.map((citation) => citation.paragraphId).join(" | "),
-        ];
-      }),
-    );
-    const blob = new Blob(
-      [
-        "\ufeff",
-        [header, ...rows].map((row) => row.map(escape).join(",")).join("\n"),
-      ],
-      { type: "text/csv;charset=utf-8" },
-    );
+  const exportXlsx = (exportMode: "internal" | "client") => {
+    const snapshot = state.approvedEstimateSnapshotId
+      ? state.estimateSnapshots.find((item) => item.id === state.approvedEstimateSnapshotId) ?? null
+      : null;
+    const workbook = createXlsxWorkbook(state, snapshot, exportMode, clientLocale === "fr" ? "fr" : "en");
+    const blob = new Blob([workbook], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `scopeforge-${state.project.id}-${clientLocale}.csv`;
+    link.download = exportMode === "client"
+      ? `scopeforge-${state.project.id}-client.xlsx`
+      : `scopeforge-${state.project.id}-internal-${snapshot?.revision ?? "draft"}.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
-    recordExport("CSV");
+    recordExport(exportMode === "internal" ? "XLSX internal" : "XLSX client");
   };
   const assumptions =
     state.project.mode === "demo" &&
@@ -1913,47 +2018,62 @@ function PreviewScreen() {
         copy={t("preview.copy")}
         action={
           <div className="preview-actions no-print">
-            {mode === "internal" && (
-              <button className="btn btn-primary" disabled={!readiness.canGenerateProposal} onClick={() => generateClientProposal()}>
-                <ArrowRight size={16} />
-                {state.proposalSnapshot
-                  ? t("preview.regenerateClientProposal")
-                  : t("preview.generateClientProposal")}
-              </button>
-            )}
-            <div className="view-switch" aria-label={t("preview.viewLabel")}>
-              <button
-                aria-pressed={mode === "internal"}
-                onClick={() => setMode("internal")}
-              >
-                {t("common.internal")}
-              </button>
-              <button
-                aria-pressed={mode === "client"}
-                disabled={!state.proposalSnapshot}
-                title={!state.proposalSnapshot ? t("preview.clientViewLocked") : undefined}
-                onClick={() => setMode("client")}
-              >
-                {t("common.clientReady")}
-              </button>
-              <i className={mode} />
+            <div className="preview-primary-actions">
+              {mode === "internal" && (
+                <button className="btn btn-primary" disabled={!readiness.canGenerateProposal} onClick={() => generateClientProposal()}>
+                  <ArrowRight size={16} />
+                  {state.proposalSnapshot
+                    ? t("preview.regenerateClientProposal")
+                    : t("preview.generateClientProposal")}
+                </button>
+              )}
+              <div className="view-switch" aria-label={t("preview.viewLabel")}>
+                <button
+                  aria-pressed={mode === "internal"}
+                  onClick={() => setMode("internal")}
+                >
+                  {t("common.internal")}
+                </button>
+                <button
+                  aria-pressed={mode === "client"}
+                  disabled={!state.proposalSnapshot}
+                  title={!state.proposalSnapshot ? t("preview.clientViewLocked") : undefined}
+                  onClick={() => setMode("client")}
+                >
+                  {t("common.clientReady")}
+                </button>
+                <i className={mode} />
+              </div>
             </div>
-            {mode === "internal" && (
-              <button className="btn" onClick={exportCsv}>
-                <Download size={16} />
-                {t("preview.estimateCsv")}
-              </button>
-            )}
-            <button
-              className="btn"
-              onClick={() => {
-                recordExport("PDF");
-                window.print();
-              }}
-            >
-              <Printer size={16} />
-              {t("preview.printPdf")}
-            </button>
+            <div className="preview-export-actions">
+              {mode === "internal" && (
+                <button className="btn" onClick={() => exportXlsx("internal")}>
+                  <Download size={16} />
+                  {t("exports.xlsxInternal")}
+                </button>
+              )}
+              {mode === "client" && state.proposalSnapshot && (
+                <button className="btn" onClick={() => exportXlsx("client")}>
+                  <Download size={16} />
+                  {t("exports.xlsxClient")}
+                </button>
+              )}
+              {mode === "internal" && (
+                <button className="btn" onClick={() => window.print()}>
+                  <Printer size={16} />
+                  {t("preview.printInternal")}
+                </button>
+              )}
+              {mode === "client" && state.proposalSnapshot?.document && (
+                <button className="btn btn-primary" onClick={() => {
+                  recordExport("PDF client");
+                  router.push(`/projects/${state.project.id}/proposals/${state.proposalSnapshot?.id}/document`);
+                }}>
+                  <FileText size={16} />
+                  {t("preview.openClientPdf")}
+                </button>
+              )}
+            </div>
           </div>
         }
       />
@@ -1975,6 +2095,111 @@ function PreviewScreen() {
           summary={state.analysis.executiveSummary}
           onSave={updateAnalysisSummary}
         />
+      )}
+      {mode === "internal" && (
+        <details className="card proposal-settings-panel no-print">
+          <summary>
+            <span>
+              <Settings2 size={17} />
+              <strong>{t("preview.documentSettings")}</strong>
+            </span>
+            <small>{proposalSettingsChanged ? t("preview.settingsPending") : t("preview.documentSettingsCopy")}</small>
+          </summary>
+          <div className="proposal-settings-body">
+            {proposalSettingsChanged && state.proposalSnapshot && (
+              <div className="proposal-settings-pending" role="status">
+                <Info size={17} aria-hidden="true" />
+                <div>
+                  <strong>{t("preview.settingsPendingTitle")}</strong>
+                  <span>{t("preview.settingsPending")}</span>
+                </div>
+                <button className="btn btn-secondary btn-sm" onClick={generateClientProposal}>
+                  {t("preview.regenerateClientProposal")}
+                </button>
+              </div>
+            )}
+            <div className="proposal-settings-grid">
+              <SelectField
+                label={t("preview.documentType")}
+                value={proposalSettings.documentType}
+                onValueChange={(value) => updateProposalSettings({ documentType: value as ClientProposalSettings["documentType"] })}
+                options={[
+                  { value: "estimate", label: t("preview.documentEstimate") },
+                  { value: "proposal", label: t("preview.documentProposal") },
+                  { value: "quote", label: t("preview.documentQuote") },
+                ]}
+              />
+              <label className="field"><span className="field-label">{t("preview.documentTitle")}</span><input value={proposalSettings.title} onChange={(event) => updateProposalSettings({ title: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.issuerName")}</span><input value={proposalSettings.issuerName} onChange={(event) => updateProposalSettings({ issuerName: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.clientName")}</span><input value={proposalSettings.clientName} onChange={(event) => updateProposalSettings({ clientName: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.documentReference")}</span><input value={proposalSettings.reference} onChange={(event) => updateProposalSettings({ reference: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.issueDate")}</span><input type="date" value={proposalSettings.issueDate} onChange={(event) => updateProposalSettings({ issueDate: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.validityDays")}</span><input type="number" min="0" max="365" value={proposalSettings.validityDays} onChange={(event) => updateProposalSettings({ validityDays: Number(event.target.value) })} /></label>
+              <SelectField
+                label={t("preview.pricingMode")}
+                value={proposalSettings.pricingMode}
+                onValueChange={(value) => updateProposalSettings({ pricingMode: value as ClientProposalSettings["pricingMode"] })}
+                options={[
+                  { value: "fixed_price", label: t("estimate.fixedPrice") },
+                  { value: "time_and_materials", label: t("estimate.timeMaterials") },
+                  { value: "effort_only", label: t("preview.effortOnly") },
+                ]}
+              />
+              <SelectField
+                label={t("preview.effortDisplay")}
+                value={proposalSettings.effortDisplay}
+                onValueChange={(value) => updateProposalSettings({ effortDisplay: value as ClientProposalSettings["effortDisplay"] })}
+                options={[
+                  { value: "low", label: t("preview.lowOnly") },
+                  { value: "likely", label: t("preview.likelyOnly") },
+                  { value: "high", label: t("preview.highOnly") },
+                  { value: "range", label: t("preview.rangeOnly") },
+                  { value: "full", label: t("preview.fullRange") },
+                ]}
+              />
+              <label className="field">
+                <span className="field-label">{state.project.estimationUnit === "day" ? t("preview.clientDailyRate") : t("preview.clientHourlyRate")}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  disabled={!proposalSettings.showPrices || proposalSettings.pricingMode === "effort_only"}
+                  value={proposalSettings.clientRate ?? selectedMethod?.referenceRate ?? ""}
+                  onChange={(event) => updateProposalSettings({ clientRate: event.target.value === "" ? null : Number(event.target.value) })}
+                />
+                <small>{proposalSettings.clientRate === null ? t("preview.rateInherited") : t("preview.rateOverridden")}</small>
+              </label>
+              <label className="field"><span className="field-label">{t("projects.currency")}</span><input value={proposalSettings.currency} maxLength={8} onChange={(event) => updateProposalSettings({ currency: event.target.value.toUpperCase() })} /></label>
+              <label className="field"><span className="field-label">{t("preview.discountRate")}</span><input type="number" min="0" max="100" step="0.1" value={proposalSettings.discountRate * 100} onChange={(event) => updateProposalSettings({ discountRate: Number(event.target.value) / 100 })} /></label>
+              <label className="field"><span className="field-label">{t("preview.taxRate")}</span><input type="number" min="0" max="100" step="0.1" disabled={!proposalSettings.showTaxes} value={proposalSettings.taxRate * 100} onChange={(event) => updateProposalSettings({ taxRate: Number(event.target.value) / 100 })} /></label>
+            </div>
+            {proposalSettings.pricingMode !== "effort_only" && (
+              <div className="proposal-rate-note">
+                <span>{selectedMethod?.referenceRate ? t("preview.rateUsed", { rate: selectedMethod.referenceRate, currency: proposalSettings.currency }) : t("preview.rateMissing")}</span>
+                <InlineHelp label={t("preview.rateHelpLabel")}>{t("preview.rateHelp")}</InlineHelp>
+              </div>
+            )}
+            <div className="proposal-settings-toggles">
+              <ProposalToggle checked={proposalSettings.showPrices} disabled={proposalSettings.pricingMode === "effort_only"} label={t("preview.showPrices")} help={t("preview.showPricesHelp")} onChange={(checked) => updateProposalSettings({ showPrices: checked })} />
+              <ProposalToggle checked={proposalSettings.showRates} disabled={!proposalSettings.showPrices || proposalSettings.pricingMode === "effort_only"} label={t("preview.showRates")} help={t("preview.showRatesHelp")} onChange={(checked) => updateProposalSettings({ showRates: checked })} />
+              <ProposalToggle checked={proposalSettings.showEffort} label={t("preview.showEffort")} help={t("preview.showEffortHelp")} onChange={(checked) => updateProposalSettings({ showEffort: checked })} />
+              <ProposalToggle checked={proposalSettings.showContext} label={t("preview.showContext")} help={t("preview.showContextHelp")} onChange={(checked) => updateProposalSettings({ showContext: checked })} />
+              <ProposalToggle checked={proposalSettings.showAssumptions} label={t("preview.showAssumptions")} help={t("preview.showAssumptionsHelp")} onChange={(checked) => updateProposalSettings({ showAssumptions: checked })} />
+              <ProposalToggle checked={proposalSettings.showExclusions} label={t("preview.showExclusions")} help={t("preview.showExclusionsHelp")} onChange={(checked) => updateProposalSettings({ showExclusions: checked })} />
+              <ProposalToggle checked={proposalSettings.showConditions} label={t("preview.showConditions")} help={t("preview.showConditionsHelp")} onChange={(checked) => updateProposalSettings({ showConditions: checked })} />
+              <ProposalToggle checked={proposalSettings.showTaxes} label={t("preview.showTaxes")} help={t("preview.showTaxesHelp")} onChange={(checked) => updateProposalSettings({ showTaxes: checked })} />
+              <ProposalToggle checked={proposalSettings.showPlanning} label={t("preview.showPlanning")} help={t("preview.showPlanningHelp")} onChange={(checked) => updateProposalSettings({ showPlanning: checked })} />
+              <ProposalToggle checked={proposalSettings.showOptions} label={t("preview.showOptions")} help={t("preview.showOptionsHelp")} onChange={(checked) => updateProposalSettings({ showOptions: checked })} />
+              <ProposalToggle checked={proposalSettings.showAcceptance} label={t("preview.showAcceptance")} help={t("preview.showAcceptanceHelp")} onChange={(checked) => updateProposalSettings({ showAcceptance: checked })} />
+            </div>
+            <div className="proposal-terms-grid">
+              <label className="field"><span className="field-label">{t("preview.paymentTerms")}</span><textarea rows={3} value={proposalSettings.paymentTerms} onChange={(event) => updateProposalSettings({ paymentTerms: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.startConditions")}</span><textarea rows={3} value={proposalSettings.startConditions} onChange={(event) => updateProposalSettings({ startConditions: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.clientResponsibilities")}</span><textarea rows={3} value={proposalSettings.clientResponsibilities} onChange={(event) => updateProposalSettings({ clientResponsibilities: event.target.value })} /></label>
+              <label className="field"><span className="field-label">{t("preview.changePolicy")}</span><textarea rows={3} value={proposalSettings.changePolicy} onChange={(event) => updateProposalSettings({ changePolicy: event.target.value })} /></label>
+            </div>
+          </div>
+        </details>
       )}
       <article
         lang={mode === "client" ? clientLocale : undefined}
@@ -2000,12 +2225,7 @@ function PreviewScreen() {
               })}
             </p>
           </div>
-          <span className="brand-signal proposal-brand" aria-label="ScopeForge">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
+          <BrandLogo variant="mark" className="proposal-brand" />
         </header>
         {mode === "internal" && state.proposalSnapshot && (
           <div className="proposal-version-note no-print">

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 140" role="img" aria-labelledby="title desc">
+  <title id="title">ScopeForge</title>
+  <desc id="desc">ScopeForge reversed wordmark for dark backgrounds.</desc>
+
+  <g fill="#58c7ad">
+    <rect x="20" y="51" width="13" height="44" rx="6.5"/>
+    <rect x="37" y="23" width="13" height="72" rx="6.5"/>
+    <rect x="54" y="36" width="13" height="59" rx="6.5"/>
+    <rect x="71" y="57" width="13" height="38" rx="6.5"/>
+  </g>
+
+  <text
+    x="116"
+    y="96"
+    fill="#fffefb"
+    font-family="Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-size="76"
+    font-weight="800"
+    letter-spacing="-3.5"
+  >ScopeForge</text>
+</svg>

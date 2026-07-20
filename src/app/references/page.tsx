@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import type { ReferenceCase } from "@/domain/schemas";
 import { LanguageSelector, useI18n } from "@/i18n";
 import { defaultReferenceCases, referenceCaseRepository } from "@/infrastructure/estimation-library";
+import { BrandLogo } from "@/ui/brand-logo";
 
 export default function ReferencesPage() {
   const { t } = useI18n();
@@ -28,7 +29,7 @@ export default function ReferencesPage() {
   const visible = references.filter((reference) => reference.status === "active" && `${reference.title} ${reference.sector} ${reference.tags.join(" ")}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   return (
     <main className="landing library-page" id="main-content">
-      <header className="landing-nav"><Link href="/" className="brand"><span className="brand-name">ScopeForge</span></Link><LanguageSelector /></header>
+      <header className="landing-nav"><Link href="/" className="landing-brand" aria-label="ScopeForge"><BrandLogo priority /></Link><LanguageSelector /></header>
       <div className="library-shell"><div className="library-heading"><div><Link href="/" className="eyebrow">{t("library.backToProjects")}</Link><h1>{t("references.title")}</h1><p>{t("references.description")}</p></div><div className="library-heading-actions"><button className="btn btn-secondary" onClick={() => fileRef.current?.click()}>{t("library.import")}</button><input ref={fileRef} type="file" accept="application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) importReference(file); }} /></div></div>
         <div className="library-create card"><div><h2>{t("library.createReference")}</h2><p className="muted">{t("references.contextOnly")}</p></div><div className="library-form"><input aria-label={t("library.referenceTitle")} placeholder={t("library.referenceTitle")} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /><input aria-label={t("library.referenceSummary")} placeholder={t("library.referenceSummary")} value={form.summary} onChange={(event) => setForm({ ...form, summary: event.target.value })} /><input aria-label={t("library.tags")} placeholder={t("library.tags")} value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} /><button className="btn btn-primary" onClick={create}>{t("common.create")}</button></div></div>
         <label className="library-search"><span>{t("common.search")}</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("common.search")} /></label>

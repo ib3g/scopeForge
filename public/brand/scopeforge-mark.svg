@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">ScopeForge</title>
+  <desc id="desc">Four measured source signals forming the ScopeForge mark.</desc>
+  <g fill="#0d5c50">
+    <rect x="36" y="52" width="12" height="42" rx="6"/>
+    <rect x="51" y="26" width="12" height="68" rx="6"/>
+    <rect x="66" y="38" width="12" height="56" rx="6"/>
+    <rect x="81" y="58" width="12" height="36" rx="6"/>
+  </g>
+</svg>

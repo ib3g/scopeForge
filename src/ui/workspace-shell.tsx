@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -15,11 +16,16 @@ import {
   Settings2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LanguageSelector, useI18n } from "@/i18n";
 import { resolvedClientLanguage } from "@/infrastructure/project-repository";
+import { projectRepository } from "@/infrastructure/project-repository";
+import { parseProjectBackup, restoreProjectBackupAsNewProject, serializeProjectBackup } from "@/infrastructure/project-backup";
+import { createAnonymizedDiagnosticReport } from "@/infrastructure/local-diagnostics";
+import { BrandLogo } from "./brand-logo";
 import { Drawer } from "./primitives/drawer";
 import { SelectField } from "./primitives/select-field";
+import { DemoTour, demoTourStorageKey } from "./demo-tour";
 import { useWorkspace } from "./workspace-provider";
 
 const steps = [
@@ -40,6 +46,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
     busy,
     executionMode,
     aiConfiguration,
+    storageStatus,
     updateProjectSettings,
     updateEstimationPreferences,
     recordExport,
@@ -58,6 +65,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   } = useWorkspace();
   const [navOpen, setNavOpen] = useState(false);
   const [panel, setPanel] = useState<"settings" | "timeline" | "readiness">();
+  const backupInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const openSettings = () => setPanel("settings");
     const openReadiness = () => setPanel("readiness");
@@ -80,6 +88,15 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const base = `/projects/${state.project.id}`;
   const nextMilestone = readiness.milestones.find((milestone) => milestone.state !== "complete");
   const nextAction = nextMilestone ? t(`readiness.${nextMilestone.label}`) : t("readiness.proposal");
+  const downloadDiagnostics = () => {
+    const blob = new Blob([createAnonymizedDiagnosticReport(state.project.id)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `scopeforge-diagnostic-${state.project.id}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const resolved =
     state.project.resolvedProjectLanguage ??
     (state.project.projectLanguage === "auto"
@@ -96,6 +113,29 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
     link.click();
     URL.revokeObjectURL(url);
     recordExport("JSON");
+  };
+  const exportBackup = () => {
+    const blob = new Blob([serializeProjectBackup(state)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `scopeforge-project-v1-${state.project.id}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const restoreBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const backup = parseProjectBackup(await file.text());
+      if (!window.confirm(t("exports.restoreConfirm", { name: String(backup.project.name ?? "project") }))) return;
+      const restored = restoreProjectBackupAsNewProject(backup);
+      projectRepository.save(restored);
+      router.push(`/projects/${restored.project.id}/sources`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : t("exports.restoreFailed"));
+    }
   };
 
   return (
@@ -121,13 +161,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       )}
       <aside className={`sidebar no-print ${navOpen ? "open" : ""}`}>
         <Link href="/" className="brand">
-          <span className="brand-signal small" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-          <span className="brand-name">ScopeForge</span>
+          <BrandLogo variant="responsive" priority />
         </Link>
         <div className="nav-project">
           <div className="nav-project-title">
@@ -224,18 +258,36 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             <span className="control-dot" />
             {t("navigation.controlNote")}
           </p>
-          <button
-            className="btn btn-ghost btn-sm"
-            aria-label={t("navigation.resetDemo")}
-            onClick={() => {
-              reset();
-              router.push(`${base}/sources`);
-              setNavOpen(false);
-            }}
-          >
-            <RotateCcw size={14} />
-            <span>{t("navigation.resetDemo")}</span>
-          </button>
+          {state.project.mode === "demo" && (
+            <>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  localStorage.removeItem(demoTourStorageKey(state.project.id));
+                  window.dispatchEvent(new Event("scopeforge:restart-demo-tour"));
+                  setNavOpen(false);
+                }}
+              >
+                <Eye size={14} />
+                <span>{t("navigation.restartTour")}</span>
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                aria-label={t("navigation.resetDemo")}
+                onClick={() => {
+                  if (!window.confirm(t("navigation.resetDemoConfirm"))) return;
+                  localStorage.removeItem(demoTourStorageKey(state.project.id));
+                  reset();
+                  router.push(`${base}/sources`);
+                  setNavOpen(false);
+                  window.dispatchEvent(new Event("scopeforge:restart-demo-tour"));
+                }}
+              >
+                <RotateCcw size={14} />
+                <span>{t("navigation.resetDemo")}</span>
+              </button>
+            </>
+          )}
         </div>
       </aside>
       <div className="main-shell">
@@ -288,20 +340,37 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               <Eye size={16} />
               <span className="label">{t("navigation.previewAction")}</span>
             </button>
-            <button
-              className="btn btn-primary"
-              aria-label={t("exports.json")}
-              onClick={exportData}
-            >
-              <Download size={16} />
-              <span className="label">{t("navigation.exportAction")}</span>
-            </button>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger className="btn btn-primary">
+                <Download size={16} />
+                <span className="label">{t("navigation.exportAction")}</span>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className="project-menu-content" sideOffset={7} align="end">
+                  <DropdownMenu.Item onSelect={exportData}>{t("exports.json")}</DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={exportBackup}>{t("exports.backup")}</DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={() => backupInputRef.current?.click()}>{t("exports.restoreBackup")}</DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+            <input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={restoreBackup} />
           </div>
         </header>
         <main id="main-content" className="content">
+          {!storageStatus.persistent && (
+            <div className="storage-warning" role="alert">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>{t("errors.storageUnavailable")}</strong>
+                <span>{t("errors.storageUnavailableCopy")}</span>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={exportBackup}>{t("exports.backup")}</button>
+            </div>
+          )}
           {children}
         </main>
       </div>
+      {state.project.mode === "demo" && <DemoTour projectId={state.project.id} />}
       <Drawer
         open={panel === "readiness"}
         onOpenChange={(open) => setPanel(open ? "readiness" : undefined)}
@@ -320,7 +389,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         description={t("preferences.futureOnly")}
         closeLabel={t("common.close")}
       >
-        <SettingsPanel />
+        {renderSettingsPanel()}
       </Drawer>
       <Drawer
         open={panel === "timeline"}
@@ -373,7 +442,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
-  function SettingsPanel() {
+  function renderSettingsPanel() {
     return (
       <div className="settings-body">
         <section>
@@ -444,6 +513,12 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               )}
             </div>
           </div>
+          {aiConfiguration?.diagnosticsEnabled && (
+            <button className="btn btn-ghost btn-sm" onClick={downloadDiagnostics}>
+              <Download size={15} />
+              {t("ai.exportDiagnostics")}
+            </button>
+          )}
         </section>
         <section>
           <h3>{t("preferences.languageTitle")}</h3>
@@ -495,7 +570,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             <div className="method-summary">
               <p>{selectedMethod.description}</p>
               <div className="method-meta">
-                <span>{t("methods.unit")}: {selectedMethod.primaryUnit.replace("person_days", t("common.days"))}</span>
+                <span>{t("methods.unit")}: {selectedMethod.primaryUnit.replace("person_days", t("common.personDays"))}</span>
                 <span>{t("methods.reserve")}: {Math.round(selectedMethod.reserveRate * 100)}%</span>
                 <span className={Object.keys(state.project.estimationMethodOverrides).length ? "override-active" : ""}>{Object.keys(state.project.estimationMethodOverrides).length ? t("methods.overridden") : t("methods.inherited")}</span>
               </div>

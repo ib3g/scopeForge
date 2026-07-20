@@ -13,6 +13,7 @@ import type {
   AIAction,
   AiExecutionMetadata,
   AiExecutionMode,
+  ClientProposalSettings,
   EstimateLine,
   EstimateSnapshot,
   EstimationPreferences,
@@ -27,10 +28,12 @@ import type {
   WorkspaceState,
   Workstream,
 } from "@/domain/schemas";
+import { buildClientDocument, defaultClientProposalSettings } from "@/domain/client-document";
 import { canApplyAiResult, isAiOperationActive, operationElapsedMs, type AiOperation, type AiOperationStatus } from "@/domain/ai-operation";
 import { determineDominantLanguage } from "@/domain/language";
 import { createInitialState } from "@/infrastructure/demo-data";
 import { createFrenchDemoState } from "@/infrastructure/demo-data-fr";
+import { recordLocalDiagnostic } from "@/infrastructure/local-diagnostics";
 import {
   normalizeWorkspaceState,
   projectRepository,
@@ -95,7 +98,15 @@ type WorkspaceContextValue = {
   operation: AiOperation | null;
   error?: string;
   executionMode: AiExecutionMode | null;
-  aiConfiguration: { configured: boolean; primaryModel: string } | null;
+  aiConfiguration: {
+    configured: boolean;
+    primaryModel: string;
+    deploymentProfile: "local" | "public_demo";
+    liveAvailable: boolean;
+    componentLabEnabled: boolean;
+    diagnosticsEnabled: boolean;
+  } | null;
+  storageStatus: { persistent: boolean; code: string | null };
   retryLastAction: () => Promise<boolean>;
   reset: () => void;
   addSource: (
@@ -146,8 +157,12 @@ type WorkspaceContextValue = {
   acknowledgeValidationWarning: (id: string) => void;
   approveEstimate: () => boolean;
   createEstimateRevision: () => void;
+  restoreEstimateRevision: (snapshotId: string) => boolean;
   generateClientProposal: () => boolean;
+  updateProposalSettings: (patch: Partial<ClientProposalSettings>) => void;
 };
+
+type PublicAIConfiguration = NonNullable<WorkspaceContextValue["aiConfiguration"]>;
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
@@ -184,6 +199,7 @@ const templateFor = (projectId: string, untitled = "Untitled project") => {
     estimateSnapshots: [],
     approvedEstimateSnapshotId: null,
     proposalSnapshot: null,
+    proposalSettings: defaultClientProposalSettings(base),
     acknowledgedValidationWarnings: [],
   };
 };
@@ -221,7 +237,12 @@ export function WorkspaceProvider({
   const [aiConfiguration, setAIConfiguration] = useState<{
     configured: boolean;
     primaryModel: string;
+    deploymentProfile: "local" | "public_demo";
+    liveAvailable: boolean;
+    componentLabEnabled: boolean;
+    diagnosticsEnabled: boolean;
   } | null>(null);
+  const [storageStatus, setStorageStatus] = useState(() => projectRepository.storageStatus());
   const [methods, setMethods] = useState<EstimationMethod[]>(defaultEstimationMethods);
   const [references, setReferences] = useState<ReferenceCase[]>(defaultReferenceCases);
   const retryRef = useRef<(() => Promise<boolean>) | undefined>(undefined);
@@ -260,7 +281,11 @@ export function WorkspaceProvider({
   }, [hydrated, references]);
 
   useEffect(() => {
-    if (hydrated) projectRepository.save(state);
+    if (hydrated) {
+      projectRepository.save(state);
+      const nextStatus = projectRepository.storageStatus();
+      setStorageStatus((current) => current.persistent === nextStatus.persistent && current.code === nextStatus.code ? current : nextStatus);
+    }
   }, [hydrated, state]);
 
   useEffect(() => {
@@ -278,10 +303,7 @@ export function WorkspaceProvider({
     void fetch("/api/ai/status", { cache: "no-store" })
       .then((response) =>
         response.ok
-          ? (response.json() as Promise<{
-              configured: boolean;
-              primaryModel: string;
-            }>)
+          ? (response.json() as Promise<PublicAIConfiguration>)
           : null,
       )
       .then((configuration) => {
@@ -430,11 +452,28 @@ export function WorkspaceProvider({
           requestId: body.execution?.requestId ?? null,
           retryable: false,
         } : item);
+        recordLocalDiagnostic({
+          id: startedOperation.id,
+          projectId: startedOperation.projectId,
+          operation: action,
+          startedAt: startedOperation.startedAt,
+          durationMs: operationElapsedMs(startedOperation),
+          status: "success",
+          errorCode: null,
+          model: body.execution.model,
+          promptVersion: body.execution.promptVersion,
+          requestId: body.execution.requestId ?? null,
+          sourceCount: current.sources.length,
+          approximateCharacters: current.sources.reduce((total, source) => total + source.paragraphs.reduce((sum, paragraph) => sum + paragraph.text.length, 0), 0),
+          inputTokens: body.execution.inputTokens ?? null,
+          outputTokens: body.execution.outputTokens ?? null,
+        });
         retryRef.current = undefined;
         return { data: body.data, execution: body.execution, operationId: startedOperation.id, projectId: startedOperation.projectId, sourceRevision: startedOperation.sourceRevision };
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === "AbortError") {
           setOperation((item) => item?.id === startedOperation.id ? { ...item, status: "cancelled", finishedAt: new Date().toISOString(), elapsedMs: operationElapsedMs(item, Date.now()), retryable: true } : item);
+          recordLocalDiagnostic({ id: startedOperation.id, projectId: startedOperation.projectId, operation: action, startedAt: startedOperation.startedAt, durationMs: operationElapsedMs(startedOperation), status: "failure", errorCode: "CANCELLED", model: startedOperation.model, promptVersion: null, requestId: null, sourceCount: current.sources.length, approximateCharacters: current.sources.reduce((total, source) => total + source.paragraphs.reduce((sum, paragraph) => sum + paragraph.text.length, 0), 0), inputTokens: null, outputTokens: null });
           return null;
         }
         setError(
@@ -458,6 +497,7 @@ export function WorkspaceProvider({
           errorMessage: cause instanceof Error ? cause.message : t("errors.aiRequestFailedDetails"),
           retryable: true,
         } : item);
+        recordLocalDiagnostic({ id: startedOperation.id, projectId: startedOperation.projectId, operation: action, startedAt: startedOperation.startedAt, durationMs: operationElapsedMs(startedOperation), status: "failure", errorCode: cause && typeof cause === "object" && "code" in cause ? String(cause.code) : "AI_REQUEST_FAILED", model: startedOperation.model, promptVersion: null, requestId: null, sourceCount: current.sources.length, approximateCharacters: current.sources.reduce((total, source) => total + source.paragraphs.reduce((sum, paragraph) => sum + paragraph.text.length, 0), 0), inputTokens: null, outputTokens: null });
         return null;
       } finally {
         abortRef.current = null;
@@ -509,6 +549,7 @@ export function WorkspaceProvider({
       operation,
       error,
       aiConfiguration,
+      storageStatus,
       executionMode: busy
         ? "requesting"
         : (errorMode ??
@@ -1126,26 +1167,45 @@ export function WorkspaceProvider({
           methods.find((item) => item.id === state.project.estimationMethodId) ?? null,
           state.project.estimationMethodOverrides,
         );
+        const draft = state.estimateSnapshots.find((item) => item.status === "in_review");
         const snapshot: EstimateSnapshot = {
-          id: `EST-${Date.now()}`,
+          id: draft?.id ?? `EST-${Date.now()}`,
           createdAt: now,
           author: t("common.localUser"),
+          status: "approved",
+          origin: draft?.origin ?? "generated",
+          reason: draft?.reason ?? null,
+          parentSnapshotId: draft?.parentSnapshotId ?? state.approvedEstimateSnapshotId,
+          validatedAt: now,
+          supersededAt: null,
           methodId: method?.id ?? null,
           methodOverrides: structuredClone(state.project.estimationMethodOverrides),
+          estimationUnit: state.project.estimationUnit,
+          contingencyRate: state.project.contingencyRate,
+          preferences: structuredClone(state.project.preferences),
           totals: structuredClone(estimateTotalsForSnapshot(state)),
           estimateLines: structuredClone(state.estimateLines),
+          workstreams: structuredClone(state.workstreams),
           assumptions: Array.from(new Set([
             ...(method?.assumptions ?? []),
             ...state.workstreams.flatMap((workstream) => workstream.modules.flatMap((module) => module.assumptions)),
           ])),
           decisions: structuredClone(state.decisions),
+          referenceCaseIds: structuredClone(state.referenceCaseIds),
           sourceVersions: currentSourceVersions(state),
           sourceChecksum: currentSourceChecksum(state),
-          revision: state.estimateSnapshots.length + 1,
+          aiExecutions: structuredClone(state.aiExecutions),
+          revision: draft?.revision ?? state.estimateSnapshots.length + 1,
         };
         setState((current) => ({
           ...current,
-          estimateSnapshots: [...current.estimateSnapshots, snapshot],
+          estimateSnapshots: current.estimateSnapshots.some((item) => item.id === snapshot.id)
+            ? current.estimateSnapshots.map((item) => item.status === "approved"
+              ? { ...item, status: "superseded" as const, supersededAt: now }
+              : item.id === snapshot.id ? snapshot : item)
+            : current.estimateSnapshots.map((item) => item.status === "approved"
+              ? { ...item, status: "superseded" as const, supersededAt: now }
+              : item).concat(snapshot),
           approvedEstimateSnapshotId: snapshot.id,
           proposalSnapshot: null,
           project: { ...current.project, status: "internally_approved" },
@@ -1154,22 +1214,123 @@ export function WorkspaceProvider({
         return true;
       },
       createEstimateRevision: () =>
-        setState((current) => ({
-          ...current,
-          approvedEstimateSnapshotId: null,
-          proposalSnapshot: null,
-          project: { ...current.project, status: "in_review" },
-          activity: addActivity(current, t("decisions.estimateRevisionCreated"), "estimate", current.project.status, "in_review"),
-        })),
+        setState((current) => {
+          const parent = current.approvedEstimateSnapshotId
+            ? current.estimateSnapshots.find((item) => item.id === current.approvedEstimateSnapshotId)
+            : null;
+          const now = new Date().toISOString();
+          const method = mergeMethodOverrides(
+            methods.find((item) => item.id === current.project.estimationMethodId) ?? null,
+            current.project.estimationMethodOverrides,
+          );
+          const draft: EstimateSnapshot = {
+            id: `EST-${Date.now()}`,
+            createdAt: now,
+            author: t("common.localUser"),
+            status: "in_review",
+            origin: "manual_revision",
+            reason: t("estimate.newRevisionReason"),
+            parentSnapshotId: parent?.id ?? null,
+            validatedAt: null,
+            supersededAt: null,
+            methodId: method?.id ?? null,
+            methodOverrides: structuredClone(current.project.estimationMethodOverrides),
+            estimationUnit: current.project.estimationUnit,
+            contingencyRate: current.project.contingencyRate,
+            preferences: structuredClone(current.project.preferences),
+            totals: structuredClone(estimateTotalsForSnapshot(current)),
+            estimateLines: structuredClone(current.estimateLines),
+            workstreams: structuredClone(current.workstreams),
+            assumptions: Array.from(new Set([
+              ...(method?.assumptions ?? []),
+              ...current.workstreams.flatMap((workstream) => workstream.modules.flatMap((module) => module.assumptions)),
+            ])),
+            decisions: structuredClone(current.decisions),
+            referenceCaseIds: structuredClone(current.referenceCaseIds),
+            sourceVersions: currentSourceVersions(current),
+            sourceChecksum: currentSourceChecksum(current),
+            aiExecutions: structuredClone(current.aiExecutions),
+            revision: current.estimateSnapshots.length + 1,
+          };
+          return {
+            ...current,
+            estimateSnapshots: [...current.estimateSnapshots, draft],
+            approvedEstimateSnapshotId: null,
+            proposalSnapshot: null,
+            project: { ...current.project, status: "in_review" },
+            activity: addActivity(current, t("decisions.estimateRevisionCreated"), "estimate", parent?.id ?? null, draft.id),
+          };
+        }),
+      restoreEstimateRevision: (snapshotId) => {
+        const snapshot = state.estimateSnapshots.find((item) => item.id === snapshotId);
+        if (!snapshot) return false;
+        setState((current) => {
+          const now = new Date().toISOString();
+          const draft: EstimateSnapshot = {
+            ...structuredClone(snapshot),
+            id: `EST-${Date.now()}`,
+            createdAt: now,
+            author: t("common.localUser"),
+            status: "in_review",
+            origin: "restored",
+            reason: t("estimate.restoreReason", { revision: snapshot.revision }),
+            parentSnapshotId: snapshot.id,
+            validatedAt: null,
+            supersededAt: null,
+            revision: current.estimateSnapshots.length + 1,
+          };
+          return {
+            ...current,
+            estimateLines: structuredClone(snapshot.estimateLines),
+            workstreams: structuredClone(snapshot.workstreams),
+            referenceCaseIds: structuredClone(snapshot.referenceCaseIds),
+            estimateSnapshots: [...current.estimateSnapshots, draft],
+            approvedEstimateSnapshotId: null,
+            proposalSnapshot: null,
+            project: {
+              ...current.project,
+              estimationUnit: snapshot.estimationUnit,
+              contingencyRate: snapshot.contingencyRate,
+              preferences: structuredClone(snapshot.preferences),
+              estimationMethodId: snapshot.methodId,
+              estimationMethodOverrides: structuredClone(snapshot.methodOverrides),
+              status: "in_review",
+            },
+            activity: addActivity(current, t("decisions.estimateRevisionRestored", { revision: snapshot.revision }), "estimate", snapshot.id, draft.id),
+          };
+        });
+        return true;
+      },
       generateClientProposal: () => {
         if (!state.approvedEstimateSnapshotId) return false;
         const snapshot = state.estimateSnapshots.find((item) => item.id === state.approvedEstimateSnapshotId);
-        if (!snapshot) return false;
+        if (!snapshot || snapshot.status !== "approved" || !snapshot.validatedAt) return false;
+        const generatedAt = new Date().toISOString();
+        const proposalId = `PROP-${Date.now()}`;
+        const settings = {
+          ...defaultClientProposalSettings(state),
+          ...(state.proposalSettings ?? {}),
+          clientName: state.proposalSettings?.clientName || state.project.clientName,
+          currency: state.proposalSettings?.currency || state.project.currency,
+        };
+        const document = buildClientDocument({
+          state,
+          snapshot,
+          settings,
+          method: mergeMethodOverrides(
+            methods.find((item) => item.id === state.project.estimationMethodId) ?? null,
+            state.project.estimationMethodOverrides,
+          ),
+          proposalId,
+          generatedAt,
+        });
         const proposalSnapshot = {
-          id: `PROP-${Date.now()}`,
+          id: proposalId,
           estimateSnapshotId: snapshot.id,
-          generatedAt: new Date().toISOString(),
+          generatedAt,
           clientOutputLanguage: resolvedClientLanguage(state),
+          settings,
+          document,
         };
         setState((current) => ({
           ...current,
@@ -1178,6 +1339,16 @@ export function WorkspaceProvider({
           activity: addActivity(current, t("decisions.clientProposalGenerated"), "project", "internally_approved", "proposal_ready"),
         }));
         return true;
+      },
+      updateProposalSettings: (patch) => {
+        setState((current) => ({
+          ...current,
+          proposalSettings: {
+            ...defaultClientProposalSettings(current),
+            ...(current.proposalSettings ?? {}),
+            ...patch,
+          },
+        }));
       },
     }),
     [
@@ -1188,6 +1359,7 @@ export function WorkspaceProvider({
       error,
       errorMode,
       aiConfiguration,
+      storageStatus,
       projectId,
       callAI,
       resolveWorkingLanguage,

@@ -52,4 +52,17 @@ describe("local project repository", () => {
     expect(migrated.project.estimationMethodOverrides).toEqual({});
     expect(migrated.referenceCaseIds).toEqual([]);
   });
+
+  it("keeps the latest project in memory when persistent storage fails", () => {
+    const created = createEmptyProject({ name: "Volatile project", projectLanguage: "en", clientOutputLanguage: "en", estimationUnit: "day", currency: "EUR", contingencyRate: 0.1 });
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    projectRepository.save(created);
+    expect(projectRepository.storageStatus()).toEqual({ persistent: false, code: "STORAGE_QUOTA_EXCEEDED" });
+    expect(projectRepository.get(created.project.id)?.project.name).toBe("Volatile project");
+    write.mockRestore();
+    projectRepository.save(created);
+    expect(projectRepository.storageStatus().persistent).toBe(true);
+  });
 });

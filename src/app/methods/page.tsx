@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { EstimationMethod } from "@/domain/schemas";
 import { LanguageSelector, useI18n } from "@/i18n";
 import { defaultEstimationMethods, estimationMethodRepository } from "@/infrastructure/estimation-library";
+import { BrandLogo } from "@/ui/brand-logo";
 
 export default function MethodsPage() {
   const { t } = useI18n();
@@ -26,7 +27,7 @@ export default function MethodsPage() {
   };
   return (
     <main className="landing library-page" id="main-content">
-      <header className="landing-nav"><Link href="/" className="brand"><span className="brand-name">ScopeForge</span></Link><LanguageSelector /></header>
+      <header className="landing-nav"><Link href="/" className="landing-brand" aria-label="ScopeForge"><BrandLogo priority /></Link><LanguageSelector /></header>
       <div className="library-shell">
         <div className="library-heading"><div><Link href="/" className="eyebrow">{t("library.backToProjects")}</Link><h1>{t("methods.title")}</h1><p>{t("methods.description")}</p></div><button className="btn btn-secondary" onClick={() => setShowArchived(!showArchived)}>{showArchived ? t("methods.active") : t("methods.archived")}</button></div>
         <div className="library-create card"><div><h2>{t("library.createMethod")}</h2><p className="muted">{t("methods.referenceHelp")}</p></div><div className="library-form"><input aria-label={t("library.methodName")} placeholder={t("library.methodName")} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><input aria-label={t("library.methodDescription")} placeholder={t("library.methodDescription")} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /><button className="btn btn-primary" onClick={create}>{t("common.create")}</button></div></div>

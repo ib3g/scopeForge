@@ -6,7 +6,7 @@ Construire un MVP fonctionnel et démontrable pour OpenAI Build Week 2026. Le pr
 
 ## Priorité
 
-Le chemin P0 défini dans `03_MVP_SCOPE.md` est prioritaire sur toute amélioration esthétique ou fonctionnalité additionnelle.
+Le chemin P0 défini dans `docs/specification/03_MVP_SCOPE.md` est prioritaire sur toute amélioration esthétique ou fonctionnalité additionnelle.
 
 ## Stack
 
@@ -43,7 +43,7 @@ Ne change pas de stack sans documenter le blocage et obtenir une décision expli
 
 ## Méthode de travail
 
-1. Lire `00_README.md`, `03_MVP_SCOPE.md` et le fichier concerné.
+1. Lire `docs/README.md`, `docs/specification/03_MVP_SCOPE.md` et le fichier concerné.
 2. Reformuler brièvement le résultat attendu.
 3. Inspecter le code existant avant modification.
 4. Implémenter la plus petite tranche verticale complète.
@@ -84,4 +84,3 @@ Configurer puis utiliser :
 ## Dernières douze heures
 
 Geler les nouvelles fonctionnalités. Se concentrer sur bugs, stabilité, README, vidéo, `/feedback` Session ID et soumission Devpost.
-

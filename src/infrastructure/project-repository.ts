@@ -1,6 +1,7 @@
 import type { ClientOutputLanguage, ProjectLanguage, WorkspaceState } from "@/domain/schemas";
 import { detectSourceLanguage } from "@/domain/language";
 import { readinessFor } from "@/domain/project-lifecycle";
+import { defaultClientProposalSettings } from "@/domain/client-document";
 import { createInitialState } from "./demo-data";
 import { createFrenchDemoState } from "./demo-data-fr";
 
@@ -14,6 +15,7 @@ export interface ProjectRepository {
   get(id: string): WorkspaceState | null;
   save(state: WorkspaceState): void;
   remove(id: string): void;
+  storageStatus(): { persistent: boolean; code: string | null };
 }
 
 function enhanceCitations(value: unknown): void {
@@ -80,17 +82,42 @@ export function normalizeWorkspaceState(input: WorkspaceState, fallbackId?: stri
   raw.referenceCaseIds ??= [];
   raw.referenceMatches ??= [];
   raw.referenceInfluences ??= raw.analysis?.referenceInfluences ?? [];
-  raw.estimateSnapshots ??= [];
   raw.approvedEstimateSnapshotId ??= null;
+  raw.estimateSnapshots = (raw.estimateSnapshots ?? []).map((snapshot) => {
+    const legacy = snapshot as Partial<typeof snapshot>;
+    return {
+      ...snapshot,
+      status: legacy.status ?? (raw.approvedEstimateSnapshotId === snapshot.id ? "approved" : "superseded"),
+      origin: legacy.origin ?? "generated",
+      reason: legacy.reason ?? null,
+      parentSnapshotId: legacy.parentSnapshotId ?? null,
+      validatedAt: legacy.validatedAt ?? snapshot.createdAt,
+      supersededAt: legacy.supersededAt ?? null,
+      estimationUnit: legacy.estimationUnit ?? raw.project.estimationUnit,
+      contingencyRate: legacy.contingencyRate ?? raw.project.contingencyRate,
+      preferences: legacy.preferences ?? raw.project.preferences,
+      workstreams: legacy.workstreams ?? raw.workstreams,
+      referenceCaseIds: legacy.referenceCaseIds ?? raw.referenceCaseIds,
+      aiExecutions: legacy.aiExecutions ?? raw.aiExecutions,
+    };
+  });
   raw.proposalSnapshot ??= null;
+  raw.proposalSettings = {
+    ...defaultClientProposalSettings(raw),
+    ...(raw.proposalSettings ?? {}),
+  };
   raw.acknowledgedValidationWarnings ??= [];
   enhanceCitations(raw);
   return raw;
 }
 
 class LocalProjectRepository implements ProjectRepository {
+  private volatileStates: WorkspaceState[] | null = null;
+  private persistenceError: string | null = null;
+
   private read(): WorkspaceState[] {
     if (typeof window === "undefined") return [];
+    if (this.volatileStates) return structuredClone(this.volatileStates);
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try { return (JSON.parse(stored) as WorkspaceState[]).map((state) => normalizeWorkspaceState(state)); }
@@ -105,7 +132,16 @@ class LocalProjectRepository implements ProjectRepository {
     this.write(seeded);
     return seeded;
   }
-  private write(states: WorkspaceState[]) { localStorage.setItem(STORAGE_KEY, JSON.stringify(states)); }
+  private write(states: WorkspaceState[]) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
+      this.volatileStates = null;
+      this.persistenceError = null;
+    } catch (error) {
+      this.volatileStates = structuredClone(states);
+      this.persistenceError = error instanceof DOMException && error.name === "QuotaExceededError" ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED";
+    }
+  }
   list() { return this.read(); }
   get(id: string) { return this.read().find((state) => state.project.id === id) ?? null; }
   save(state: WorkspaceState) {
@@ -116,6 +152,7 @@ class LocalProjectRepository implements ProjectRepository {
     this.write(states);
   }
   remove(id: string) { this.write(this.read().filter((state) => state.project.id !== id)); }
+  storageStatus() { return { persistent: this.persistenceError === null, code: this.persistenceError }; }
 }
 
 export const projectRepository: ProjectRepository = new LocalProjectRepository();

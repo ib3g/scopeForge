@@ -151,6 +151,10 @@ describe("OpenAI live/demo boundary", () => {
     expect(configuration).toEqual({
       configured: true,
       primaryModel: "gpt-5.6",
+      deploymentProfile: "local",
+      liveAvailable: true,
+      componentLabEnabled: true,
+      diagnosticsEnabled: true,
     });
     expect(JSON.stringify(configuration)).not.toContain("test-only-secret");
   });
@@ -175,6 +179,19 @@ describe("OpenAI live/demo boundary", () => {
       requestId: "resp_live_123",
     });
     expect(result.execution.sourceChecksum).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("normalizes a model coverage ratio to the UI percentage scale", async () => {
+    const client = clientReturning({ ...liveAnalysis, coverageScore: 0.92 });
+    const result = await runStructuredAction(
+      "analysis",
+      { sources: liveSources, languageContext: { projectLanguage: "en" } },
+      { projectMode: "live", client },
+    );
+
+    expect(result.data).toMatchObject({ coverageScore: 92 });
+    const request = (client.responses.parse as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(JSON.stringify(request.input)).toContain("use 92 for 92%, never 0.92");
   });
 
   it("propagates an API failure without returning precomputed data", async () => {

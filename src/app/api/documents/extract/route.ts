@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractDocument, type SupportedDocumentKind } from "@/infrastructure/document-extraction";
+import { getServerEnvironment, ServerEnvironmentError } from "@/infrastructure/server-env";
 
-const MAX_BYTES = 10 * 1024 * 1024;
 const RequestSchema = z.object({
   filename: z.string().min(1).max(240),
   mimeType: z.string().max(120),
@@ -21,11 +21,17 @@ function kindFor(filename: string, mimeType: string): SupportedDocumentKind | nu
 
 export async function POST(request: Request) {
   try {
+    const environment = getServerEnvironment();
+    const declaredLength = Number(request.headers.get("content-length") ?? 0);
+    const encodedLimit = Math.ceil(environment.MAX_UPLOAD_BYTES * 1.38) + 4096;
+    if (declaredLength > encodedLimit)
+      return NextResponse.json({ error: "The document exceeds the configured upload limit." }, { status: 413 });
     const input = RequestSchema.parse(await request.json());
     const kind = kindFor(input.filename, input.mimeType);
     if (!kind) return NextResponse.json({ error: "This file type is not supported." }, { status: 415 });
     const bytes = Buffer.from(input.data, "base64");
-    if (!bytes.length || bytes.length > MAX_BYTES) return NextResponse.json({ error: "The document is empty or exceeds the 10 MB limit." }, { status: 413 });
+    if (!bytes.length || bytes.length > environment.MAX_UPLOAD_BYTES)
+      return NextResponse.json({ error: "The document is empty or exceeds the configured upload limit." }, { status: 413 });
     const extraction = extractDocument(bytes, kind);
     const checksum = createHash("sha256").update(bytes).digest("hex");
     return NextResponse.json({
@@ -36,7 +42,13 @@ export async function POST(request: Request) {
       ...extraction,
     });
   } catch (error) {
-    const message = error instanceof z.ZodError ? "Invalid document extraction request." : error instanceof Error ? error.message : "Document extraction failed.";
+    const message = error instanceof ServerEnvironmentError
+      ? "The server configuration is invalid."
+      : error instanceof z.ZodError
+        ? "Invalid document extraction request."
+        : error instanceof Error
+          ? error.message
+          : "Document extraction failed.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

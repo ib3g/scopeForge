@@ -32,6 +32,7 @@ import {
   projectSummary,
 } from "@/infrastructure/project-repository";
 import { LanguageSelector, useI18n } from "@/i18n";
+import { BrandLogo } from "@/ui/brand-logo";
 import { SelectField } from "@/ui/primitives/select-field";
 import { Modal } from "@/ui/primitives/drawer";
 
@@ -58,7 +59,7 @@ const emptyForm: CreateForm = {
 
 export default function Home() {
   const router = useRouter();
-  const { t, date } = useI18n();
+  const { t, date, locale } = useI18n();
   const [projects, setProjects] = useState<WorkspaceState[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"active" | "archived">("active");
@@ -67,11 +68,19 @@ export default function Home() {
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceState>();
   const [renaming, setRenaming] = useState<string>();
   const [renameValue, setRenameValue] = useState("");
+  const [publicDemo, setPublicDemo] = useState(false);
+  const [publicNoticeOpen, setPublicNoticeOpen] = useState(false);
 
   const refresh = () => setProjects(projectRepository.list());
   useEffect(() => {
     // Keep the server and first client render identical, then hydrate the local repository.
     queueMicrotask(refresh);
+  }, []);
+  useEffect(() => {
+    void fetch("/api/ai/status", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ deploymentProfile?: string }> : null)
+      .then((configuration) => setPublicDemo(configuration?.deploymentProfile === "public_demo"))
+      .catch(() => undefined);
   }, []);
   const visible = useMemo(
     () =>
@@ -98,6 +107,10 @@ export default function Home() {
     setCreateOpen(false);
     setForm(emptyForm);
     router.push(`/projects/${state.project.id}/sources`);
+  };
+  const requestProjectCreation = () => {
+    if (publicDemo) setPublicNoticeOpen(true);
+    else setCreateOpen(true);
   };
   const archive = (state: WorkspaceState) => {
     projectRepository.save({
@@ -126,15 +139,9 @@ export default function Home() {
   return (
     <main className="landing dashboard-page" id="main-content">
       <header className="landing-nav">
-        <div className="landing-brand">
-          <span className="brand-signal" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>ScopeForge</span>
-        </div>
+        <Link href="/" className="landing-brand" aria-label="ScopeForge">
+          <BrandLogo priority />
+        </Link>
         <div className="landing-nav-actions">
           <span className="landing-event">{t("onboarding.buildWeek")}</span>
           <LanguageSelector />
@@ -151,17 +158,14 @@ export default function Home() {
           <div className="landing-actions">
             <button
               className="btn btn-primary landing-cta"
-              aria-label={t("onboarding.loadDemo")}
-              onClick={() => loadDemo("en")}
+              aria-label={t("onboarding.openDemo")}
+              onClick={() => loadDemo(locale)}
             >
-              {t("onboarding.loadDemo")} <ArrowRight size={17} />
-            </button>
-            <button className="btn landing-cta" onClick={() => loadDemo("fr")}>
-              {t("onboarding.loadFrenchDemo")}
+              {t("onboarding.openDemo")} <ArrowRight size={17} />
             </button>
             <button
               className="btn btn-ghost landing-cta"
-              onClick={() => setCreateOpen(true)}
+              onClick={requestProjectCreation}
             >
               <FolderPlus size={17} />
               {t("onboarding.createProject")}
@@ -195,12 +199,7 @@ export default function Home() {
             </div>
             <div className="preview-window">
               <div className="preview-top">
-                <span className="brand-signal small">
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </span>
+                <BrandLogo variant="mark" decorative />
                 <strong>Calyra</strong>
                 <span>FR + EN</span>
               </div>
@@ -254,7 +253,7 @@ export default function Home() {
           <div className="projects-heading-actions">
             <Link className="btn btn-ghost" href="/methods">{t("library.methods")}</Link>
             <Link className="btn btn-ghost" href="/references">{t("library.references")}</Link>
-            <button className="btn btn-primary" onClick={() => setCreateOpen(true)}><FolderPlus size={16} />{t("projects.newProject")}</button>
+            <button className="btn btn-primary" onClick={requestProjectCreation}><FolderPlus size={16} />{t("projects.newProject")}</button>
           </div>
         </div>
         <div className="projects-toolbar">
@@ -429,6 +428,24 @@ export default function Home() {
         )}
       </section>
 
+      <Modal
+        open={publicNoticeOpen}
+        onOpenChange={setPublicNoticeOpen}
+        eyebrow={t("onboarding.publicDemoEyebrow")}
+        title={t("onboarding.publicDemoTitle")}
+        description={t("onboarding.publicDemoCopy")}
+        closeLabel={t("common.close")}
+        footer={
+          <button className="btn btn-primary" onClick={() => {
+            setPublicNoticeOpen(false);
+            loadDemo(locale);
+          }}>
+            {t("onboarding.openDemo")}
+          </button>
+        }
+      >
+        <p className="muted-copy">{t("onboarding.publicDemoLocal")}</p>
+      </Modal>
       <Modal
         open={createOpen}
         onOpenChange={setCreateOpen}

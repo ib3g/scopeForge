@@ -8,6 +8,7 @@ import {
   ProjectAnalysisSchema,
   QuestionsSchema,
   ScopeSchema,
+  normalizeCoverageScore,
   type AIAction,
   type AiExecutionMetadata,
   type ProjectMode,
@@ -26,6 +27,7 @@ import {
   frenchDemoWorkstreams,
   makeFrenchDemoChangeProposal,
 } from "@/infrastructure/demo-data-fr";
+import { getServerEnvironment } from "@/infrastructure/server-env";
 
 export type { AIAction } from "@/domain/schemas";
 export const PROMPT_VERSION = "scopeforge-editorial-v2";
@@ -38,7 +40,7 @@ const schemas = {
 } as const;
 const prompts: Record<AIAction, string> = {
   analysis:
-    "Analyze every supplied source into one structured project view. Treat compatible information as complementary by default. Merge semantic duplicates without losing citations. Distinguish confirmed facts, inferences, estimation assumptions and missing information. Report an inconsistency only when claims cannot coexist; an empty list is normal. Every material finding and contribution needs citations using supplied paragraph IDs. Set resolution to null for unresolved inconsistencies. If estimationContext contains selected reference cases, add referenceInfluences only for concrete ways those cases informed a question, scope framing or estimate; never invent a requirement from a reference. Return an empty referenceInfluences array when no reference affected the analysis.",
+    "Analyze every supplied source into one structured project view. Treat compatible information as complementary by default. Merge semantic duplicates without losing citations. Distinguish confirmed facts, inferences, estimation assumptions and missing information. Report an inconsistency only when claims cannot coexist; an empty list is normal. Every material finding and contribution needs citations using supplied paragraph IDs. Set coverageScore to an integer percentage from 0 to 100: use 92 for 92%, never 0.92. Set resolution to null for unresolved inconsistencies. If estimationContext contains selected reference cases, add referenceInfluences only for concrete ways those cases informed a question, scope framing or estimate; never invent a requirement from a reference. Return an empty referenceInfluences array when no reference affected the analysis.",
   questions:
     "Prepare the smallest useful set of direct, non-duplicated clarification questions. Each question must be ready to ask a client and explain why its answer affects scope, effort, architecture, delivery or commercial framing. Return at most 8 questions. Every question is initially open and must use answer: null.",
   scope:
@@ -142,10 +144,15 @@ export class AIConfigurationError extends Error {
 }
 
 export function getAIConfiguration() {
+  const environment = getServerEnvironment();
   return {
-    configured: Boolean(process.env.OPENAI_API_KEY),
+    configured: Boolean(environment.OPENAI_API_KEY),
     primaryModel:
-      process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-5.6",
+      environment.OPENAI_PRIMARY_MODEL ?? environment.OPENAI_MODEL ?? "gpt-5.6",
+    deploymentProfile: environment.DEPLOYMENT_PROFILE,
+    liveAvailable: environment.DEPLOYMENT_PROFILE === "local",
+    componentLabEnabled: environment.DEPLOYMENT_PROFILE === "local" && environment.ENABLE_COMPONENT_LAB,
+    diagnosticsEnabled: environment.DEPLOYMENT_PROFILE === "local" && environment.ENABLE_DIAGNOSTICS,
   };
 }
 
@@ -177,6 +184,7 @@ function executionMetadata(
   model: string | null,
   checksum: string,
   requestId: string | null = null,
+  usage?: { input_tokens?: number; output_tokens?: number } | null,
 ): AiExecutionMetadata {
   return {
     executionMode,
@@ -185,6 +193,8 @@ function executionMetadata(
     promptVersion: PROMPT_VERSION,
     sourceChecksum: checksum,
     requestId,
+    inputTokens: usage?.input_tokens ?? null,
+    outputTokens: usage?.output_tokens ?? null,
   };
 }
 
@@ -193,11 +203,12 @@ export async function runStructuredAction(
   payload: unknown,
   options: { projectMode: ProjectMode; client?: OpenAI },
 ) {
+  const environment = getServerEnvironment();
   const { configured, primaryModel: model } = getAIConfiguration();
   const checksum = sourceChecksum(payload);
   const usePrecomputed =
     options.projectMode === "demo" &&
-    (process.env.DEMO_MODE === "true" || !configured);
+    (environment.DEPLOYMENT_PROFILE === "public_demo" || environment.DEMO_MODE || !configured);
   if (usePrecomputed) {
     return {
       data: fallbackFor(action, payload),
@@ -207,7 +218,7 @@ export async function runStructuredAction(
   if (!configured && !options.client) throw new AIConfigurationError();
 
   const client =
-    options.client ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    options.client ?? new OpenAI({ apiKey: environment.OPENAI_API_KEY });
   const schema = schemas[action];
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -223,17 +234,27 @@ export async function runStructuredAction(
         ],
         text: { format: zodTextFormat(schema, `scopeforge_${action}`) },
         max_output_tokens: 12000,
-      });
+      }, { signal: AbortSignal.timeout(environment.AI_REQUEST_TIMEOUT_MS) });
       if (!response.output_parsed)
         throw new Error("Model returned no structured output");
-      assertCitationProvenance(response.output_parsed, payload);
+      const data = action === "analysis"
+        ? (() => {
+            const analysis = ProjectAnalysisSchema.parse(response.output_parsed);
+            return {
+              ...analysis,
+              coverageScore: normalizeCoverageScore(analysis.coverageScore),
+            };
+          })()
+        : response.output_parsed;
+      assertCitationProvenance(data, payload);
       return {
-        data: response.output_parsed,
+        data,
         execution: executionMetadata(
           "live",
           model,
           checksum,
           response.id ?? null,
+          response.usage,
         ),
       };
     } catch (error) {

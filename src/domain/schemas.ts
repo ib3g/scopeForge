@@ -129,7 +129,11 @@ export const EstimationComparisonSchema = z.object({
 
 export const ProjectAnalysisSchema = z.object({
   executiveSummary: z.string(),
-  coverageScore: z.number().min(0).max(100),
+  coverageScore: z
+    .number()
+    .min(0)
+    .max(100)
+    .describe("Integer percentage of important source information covered, from 0 to 100 (for example, 92 means 92%)."),
   findings: z.array(FindingSchema),
   sourceContributions: z.array(SourceContributionSchema),
   duplicatesMerged: z.array(z.object({ statement: z.string(), citationCount: z.number().int().positive() })),
@@ -137,6 +141,15 @@ export const ProjectAnalysisSchema = z.object({
   suggestedNextStep: z.string(),
   referenceInfluences: z.array(ReferenceInfluenceSchema),
 });
+
+/**
+ * Live models occasionally express a percentage as a 0–1 ratio. Keep the
+ * persisted domain value on the same 0–100 scale as the Demo fixtures and UI.
+ */
+export function normalizeCoverageScore(value: number) {
+  if (value > 0 && value <= 1) return Math.round(value * 100);
+  return Math.round(value);
+}
 
 export const QuestionSchema = z.object({
   id: z.string(),
@@ -265,6 +278,95 @@ export type EstimationPreferences = {
   commercialModel: "fixed_price" | "time_and_materials";
   deliverableType: DeliverableType;
 };
+export type ClientEffortDisplay = "low" | "likely" | "high" | "range" | "full";
+export type ClientPricingMode = "fixed_price" | "time_and_materials" | "effort_only";
+export type ClientProposalSettings = {
+  documentType: "estimate" | "proposal" | "quote";
+  title: string;
+  issuerName: string;
+  issuerAddress: string;
+  issuerEmail: string;
+  issuerPhone: string;
+  clientName: string;
+  reference: string;
+  issueDate: string;
+  validityDays: number;
+  currency: string;
+  pricingMode: ClientPricingMode;
+  clientRate: number | null;
+  effortDisplay: ClientEffortDisplay;
+  showPrices: boolean;
+  showRates: boolean;
+  showEffort: boolean;
+  showContext: boolean;
+  showAssumptions: boolean;
+  showExclusions: boolean;
+  showConditions: boolean;
+  showTaxes: boolean;
+  taxRate: number;
+  discountRate: number;
+  showPlanning: boolean;
+  showOptions: boolean;
+  showAcceptance: boolean;
+  paymentTerms: string;
+  startConditions: string;
+  clientResponsibilities: string;
+  changePolicy: string;
+  finalNotes: string;
+  accentColor: string;
+  logoDataUrl: string | null;
+};
+export type ClientDocumentLine = {
+  id: string;
+  workstream: string;
+  name: string;
+  description: string;
+  status: "included" | "optional";
+  low: number;
+  likely: number;
+  high: number;
+  unit: "day" | "hour";
+  rate: number | null;
+  amount: number | null;
+};
+export type ClientDocumentModel = {
+  schemaVersion: 1;
+  id: string;
+  projectId: string;
+  estimateSnapshotId: string;
+  locale: "fr" | "en";
+  status: "validated";
+  generatedAt: string;
+  validatedAt: string;
+  revision: number;
+  settings: ClientProposalSettings;
+  project: {
+    name: string;
+    clientName: string;
+    context: string;
+    objective: string;
+    approach: string;
+  };
+  included: ClientDocumentLine[];
+  options: ClientDocumentLine[];
+  exclusions: Array<{ id: string; name: string; description: string }>;
+  assumptions: string[];
+  decisions: Array<{ id: string; statement: string; createdAt: string }>;
+  planning: Array<{ name: string; description: string }>;
+  totals: {
+    effortLow: number;
+    effortLikely: number;
+    effortHigh: number;
+    reserveLikely: number;
+    optionsLikely: number;
+    subtotal: number | null;
+    discount: number | null;
+    totalExcludingTax: number | null;
+    tax: number | null;
+    totalIncludingTax: number | null;
+    optionsAmount: number | null;
+  };
+};
 export type EstimationMethodOverrides = Partial<Pick<EstimationMethod, "primaryUnit" | "referenceRate" | "reserveRate" | "rounding" | "lowFactor" | "highFactor">>;
 export type Activity = { id: string; label: string; createdAt: string; kind?: "decision" | "language" | "estimate" | "ai_proposal" | "export" | "project" | "source"; before?: string | null; after?: string | null };
 export type AIAction = "analysis" | "questions" | "scope" | "estimate" | "review";
@@ -276,6 +378,8 @@ export type AiExecutionMetadata = {
   promptVersion: string;
   sourceChecksum: string;
   requestId?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
 };
 export type AIExecution = AiExecutionMetadata & { action: AIAction };
 export type AnalysisVersion = { id: string; locale: string; analysis: ProjectAnalysis; execution?: AiExecutionMetadata; createdAt: string };
@@ -285,18 +389,32 @@ export type EstimateTotalsSnapshot = {
   proposed: { low: number; likely: number; high: number };
   options: { low: number; likely: number; high: number };
 };
+export type EstimateRevisionStatus = "draft" | "in_review" | "approved" | "superseded";
+export type EstimateRevisionOrigin = "generated" | "manual_revision" | "restored";
 export type EstimateSnapshot = {
   id: string;
   createdAt: string;
   author: string;
+  status: EstimateRevisionStatus;
+  origin: EstimateRevisionOrigin;
+  reason: string | null;
+  parentSnapshotId: string | null;
+  validatedAt: string | null;
+  supersededAt: string | null;
   methodId: string | null;
   methodOverrides: EstimationMethodOverrides;
+  estimationUnit: "day" | "hour";
+  contingencyRate: number;
+  preferences: EstimationPreferences;
   totals: EstimateTotalsSnapshot;
   estimateLines: EstimateLine[];
+  workstreams: Workstream[];
   assumptions: string[];
   decisions: Decision[];
+  referenceCaseIds: string[];
   sourceVersions: Array<{ sourceId: string; checksum: string }>;
   sourceChecksum: string;
+  aiExecutions: Partial<Record<AIAction, AiExecutionMetadata>>;
   revision: number;
 };
 export type ProposalSnapshot = {
@@ -304,6 +422,8 @@ export type ProposalSnapshot = {
   estimateSnapshotId: string;
   generatedAt: string;
   clientOutputLanguage: string;
+  settings?: ClientProposalSettings;
+  document?: ClientDocumentModel;
 };
 
 export type WorkspaceState = {
@@ -347,5 +467,6 @@ export type WorkspaceState = {
   estimateSnapshots: EstimateSnapshot[];
   approvedEstimateSnapshotId: string | null;
   proposalSnapshot: ProposalSnapshot | null;
+  proposalSettings?: ClientProposalSettings;
   acknowledgedValidationWarnings: string[];
 };
