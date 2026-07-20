@@ -39,7 +39,7 @@ function requestPdf(document: ClientDocumentModel) {
   return request;
 }
 
-function PdfPagePreview({ bytes, title, onError }: { bytes: Uint8Array; title: string; onError: (error: Error) => void }) {
+function PdfPagePreview({ bytes, title, onReady, onError }: { bytes: Uint8Array; title: string; onReady: () => void; onError: (error: Error) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -78,6 +78,7 @@ function PdfPagePreview({ bytes, title, onError }: { bytes: Uint8Array; title: s
           renderTasks.push(renderTask);
           await renderTask.promise;
         }
+        if (!cancelled) onReady();
       } catch (cause) {
         if (!cancelled) onError(cause instanceof Error ? cause : new Error("PDF preview failed"));
       }
@@ -88,7 +89,7 @@ function PdfPagePreview({ bytes, title, onError }: { bytes: Uint8Array; title: s
       renderTasks.forEach((task) => task.cancel());
       void loadingTask?.destroy();
     };
-  }, [bytes, onError, title]);
+  }, [bytes, onError, onReady, title]);
 
   return <div ref={containerRef} className="client-document-pages" aria-label={title} />;
 }
@@ -101,6 +102,7 @@ const labels = {
     download: "Télécharger le PDF",
     loading: "Génération du document PDF",
     loadingCopy: "Mise en page et pagination de la proposition validée.",
+    rendering: "Préparation de l’aperçu avant téléchargement",
     missing: "Cette proposition validée est introuvable ou doit être régénérée.",
     failed: "Le PDF n’a pas pu être généré. La proposition validée est conservée.",
     retry: "Réessayer",
@@ -112,6 +114,7 @@ const labels = {
     download: "Download PDF",
     loading: "Generating PDF document",
     loadingCopy: "Laying out and paginating the approved proposal.",
+    rendering: "Preparing the preview before download",
     missing: "This approved proposal is missing or must be regenerated.",
     failed: "The PDF could not be generated. The approved proposal is preserved.",
     retry: "Retry",
@@ -153,7 +156,6 @@ export function ClientDocumentPage({ projectId, proposalId }: { projectId: strin
       nextUrl = URL.createObjectURL(blob);
       setPdfBytes(bytes);
       setPdfUrl(nextUrl);
-      setState("ready");
     }).catch((cause: unknown) => {
       if (cancelled) return;
       setError(cause instanceof Error ? cause.message : "PDF generation failed");
@@ -171,8 +173,10 @@ export function ClientDocumentPage({ projectId, proposalId }: { projectId: strin
     setError(null);
     if (document) pdfRequestCache.delete(pdfCacheKey(document));
     setPdfBytes(null);
+    setPdfUrl(null);
     setDocument((current) => current ? { ...current } : current);
   };
+  const previewReady = useCallback(() => setState("ready"), []);
   const previewError = useCallback((cause: Error) => {
     setError(cause.message);
     setState("failed");
@@ -198,17 +202,23 @@ export function ClientDocumentPage({ projectId, proposalId }: { projectId: strin
       </header>
 
       <section className="client-document-stage" aria-live="polite" aria-busy={state === "loading"}>
-        {state === "loading" && (
+        {state === "loading" && !pdfBytes && (
           <div className="client-document-state">
             <span className="document-progress" aria-hidden="true" />
             <strong>{t.loading}</strong>
             <p>{t.loadingCopy}</p>
           </div>
         )}
+        {state === "loading" && pdfBytes && (
+          <div className="client-document-rendering" role="status">
+            <span className="document-progress" aria-hidden="true" />
+            <span>{t.rendering}</span>
+          </div>
+        )}
         {state === "missing" && <div className="client-document-state"><strong>{t.missing}</strong><button className="btn" onClick={() => router.push(`/projects/${projectId}/preview`)}>{t.back}</button></div>}
         {state === "failed" && <div className="client-document-state"><strong>{t.failed}</strong>{error && <p>{error}</p>}<button className="btn" onClick={retry}><RefreshCw size={16} />{t.retry}</button></div>}
-        {state === "ready" && pdfBytes && (
-          <PdfPagePreview bytes={pdfBytes} title={t.title} onError={previewError} />
+        {state !== "failed" && pdfBytes && (
+          <PdfPagePreview bytes={pdfBytes} title={t.title} onReady={previewReady} onError={previewError} />
         )}
       </section>
     </main>

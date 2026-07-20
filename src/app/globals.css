@@ -6564,6 +6564,20 @@ select:focus-visible {
   gap: 1.5rem;
   width: 100%;
 }
+.client-document-rendering {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+.client-document-rendering .document-progress {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+}
 .client-document-page {
   display: block;
   width: auto;
