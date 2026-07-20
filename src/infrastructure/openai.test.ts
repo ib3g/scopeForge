@@ -256,4 +256,57 @@ describe("OpenAI live/demo boundary", () => {
     const request = (client.responses.parse as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(JSON.stringify(request.input)).not.toContain("DUPLICATE-FULL-SOURCE-CONTENT");
   });
+
+  it("keeps the scope request concise and limited to cited source paragraphs", async () => {
+    const scope = {
+      workstreams: [
+        {
+          id: "W-1",
+          name: "Delivery",
+          description: "Deliver the requested catalogue.",
+          order: 1,
+          modules: [
+            {
+              id: "M-1",
+              name: "Catalogue",
+              description: "A searchable service catalogue.",
+              status: "included",
+              features: ["Search"],
+              dependencies: [],
+              assumptions: [],
+              citations: liveAnalysis.findings[0].citations,
+            },
+          ],
+        },
+      ],
+    };
+    const client = clientReturning(scope);
+    await runStructuredAction(
+      "scope",
+      {
+        analysis: liveAnalysis,
+        decisions: [],
+        sources: [
+          {
+            ...liveSources[0],
+            paragraphs: [
+              ...liveSources[0].paragraphs,
+              { id: "LIVE-SRC-01-P999", text: "Unrelated source detail." },
+            ],
+          },
+        ],
+      },
+      { projectMode: "live", client },
+    );
+
+    const request = (client.responses.parse as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const serializedInput = JSON.stringify(request.input);
+    expect(request.reasoning).toEqual({ effort: "none" });
+    expect(request.text.verbosity).toBe("low");
+    expect(request.max_output_tokens).toBe(5000);
+    expect(serializedInput).toContain("LIVE-SRC-01-P001");
+    expect(serializedInput).not.toContain("LIVE-SRC-01-P999");
+    expect(serializedInput).not.toContain("sourceContributions");
+    expect(serializedInput).not.toContain("duplicatesMerged");
+  });
 });

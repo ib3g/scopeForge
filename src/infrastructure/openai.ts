@@ -41,9 +41,16 @@ const schemas = {
 const actionLimits: Record<AIAction, number> = {
   analysis: 7_000,
   questions: 4_000,
-  scope: 6_500,
+  scope: 5_000,
   estimate: 6_500,
   review: 3_000,
+};
+const reasoningEffort: Record<AIAction, "none" | "low"> = {
+  analysis: "low",
+  questions: "low",
+  scope: "none",
+  estimate: "low",
+  review: "low",
 };
 const prompts: Record<AIAction, string> = {
   analysis:
@@ -51,7 +58,7 @@ const prompts: Record<AIAction, string> = {
   questions:
     "Prepare the smallest useful set of direct, non-duplicated clarification questions. Each question must be ready to ask a client and explain why its answer affects scope, effort, architecture, delivery or commercial framing. Return at most 8 questions. Every question is initially open and must use answer: null.",
   scope:
-    "Build a precise initial scope from the approved analysis and recorded user decisions. Organize workstreams and modules with concrete names and descriptions; mark each included, optional, excluded or deferred. Preserve exclusions and citations. Do not reintroduce rejected requirements.",
+    "Build a concise, precise initial scope from the approved analysis and recorded user decisions. Return 2 to 6 workstreams and no more than 5 modules per workstream. Each module may contain at most 6 features, 4 dependencies, 4 assumptions and 4 citations. Keep descriptions to one or two sentences. Reuse only citations supplied in the compact analysis; never create a new citation or quote. Mark each module included, optional, excluded or deferred. Preserve explicit exclusions and do not reintroduce rejected requirements.",
   estimate:
     "Propose low, likely and high effort for every included, optional and excluded module in the requested estimation unit. Excluded modules must use zero values. Explain the assumptions and range drivers in plain professional language. Do not calculate totals. Respect low <= likely <= high.",
   review:
@@ -166,17 +173,69 @@ export class AIResponseValidationError extends Error {
   }
 }
 
-function payloadForModel(payload: unknown) {
+function collectCitationParagraphs(value: unknown, target: Set<string>) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectCitationParagraphs(item, target));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (typeof record.sourceId === "string" && typeof record.paragraphId === "string") {
+    target.add(`${record.sourceId}:${record.paragraphId}`);
+  }
+  Object.values(record).forEach((item) => collectCitationParagraphs(item, target));
+}
+
+function payloadForModel(action: AIAction, payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const record = payload as Record<string, unknown>;
   if (!Array.isArray(record.sources)) return payload;
+  const compactAnalysis = action === "scope" && record.analysis && typeof record.analysis === "object"
+    ? (() => {
+        const analysis = record.analysis as Record<string, unknown>;
+        return {
+          executiveSummary: analysis.executiveSummary,
+          findings: analysis.findings,
+          inconsistencies: analysis.inconsistencies,
+          referenceInfluences: analysis.referenceInfluences,
+        };
+      })()
+    : record.analysis;
+  const citedParagraphs = new Set<string>();
+  if (action === "scope") collectCitationParagraphs(compactAnalysis, citedParagraphs);
   return {
     ...record,
+    ...(action === "scope" ? { analysis: compactAnalysis } : {}),
     sources: record.sources.map((source) => {
       if (!source || typeof source !== "object" || Array.isArray(source)) return source;
-      const { content: _duplicateContent, ...sourceWithoutDuplicateContent } = source as Record<string, unknown>;
+      const {
+        content: _duplicateContent,
+        ...sourceWithoutDuplicateContent
+      } = source as Record<string, unknown>;
       void _duplicateContent;
-      return sourceWithoutDuplicateContent;
+      if (action !== "scope") return sourceWithoutDuplicateContent;
+      const {
+        document: _document,
+        language: _language,
+        origin: _origin,
+        kind: _kind,
+        ...compactSource
+      } = sourceWithoutDuplicateContent;
+      void _document;
+      void _language;
+      void _origin;
+      void _kind;
+      if (!Array.isArray(compactSource.paragraphs)) return compactSource;
+      const sourceId = compactSource.id;
+      return {
+        ...compactSource,
+        paragraphs: compactSource.paragraphs.filter((paragraph) => {
+          if (!paragraph || typeof paragraph !== "object" || Array.isArray(paragraph)) return false;
+          const paragraphId = (paragraph as Record<string, unknown>).id;
+          return typeof sourceId === "string" && typeof paragraphId === "string" &&
+            citedParagraphs.has(`${sourceId}:${paragraphId}`);
+        }),
+      };
     }),
   };
 }
@@ -254,7 +313,7 @@ export async function runStructuredAction(
   const environment = getServerEnvironment();
   const { configured, primaryModel: model } = getAIConfiguration();
   const checksum = sourceChecksum(payload);
-  const modelPayload = payloadForModel(payload);
+  const modelPayload = payloadForModel(action, payload);
   const usePrecomputed =
     options.projectMode === "demo" &&
     (environment.DEPLOYMENT_PROFILE === "public_demo" || environment.DEMO_MODE || !configured);
@@ -277,7 +336,7 @@ export async function runStructuredAction(
         : Math.min(environment.AI_REQUEST_TIMEOUT_MS, 30_000);
       const response = await client.responses.parse({
         model,
-        reasoning: { effort: "low" },
+        reasoning: { effort: reasoningEffort[action] },
         input: [
           { role: "system", content: SYSTEM_PROMPT },
           {
@@ -285,7 +344,10 @@ export async function runStructuredAction(
             content: `${prompts[action]}\nUse languageContext.projectLanguage for every generated user-facing value. languageContext.interfaceLocale is UI context only and languageContext.clientOutputLanguage applies to client deliverables. Source language metadata is advisory; quoted excerpts must remain original.\n\n<untrusted_project_data>\n${JSON.stringify(modelPayload)}\n</untrusted_project_data>${attempt ? "\nPrevious output failed validation. Return a corrected schema-valid result." : ""}`,
           },
         ],
-        text: { format: zodTextFormat(schema, `scopeforge_${action}`) },
+        text: {
+          format: zodTextFormat(schema, `scopeforge_${action}`),
+          verbosity: action === "scope" ? "low" : "medium",
+        },
         max_output_tokens: actionLimits[action],
       }, { signal: AbortSignal.timeout(requestTimeoutMs) });
       if (!response.output_parsed)

@@ -168,19 +168,19 @@ export const ScopeModuleSchema = z.object({
   name: z.string(),
   description: z.string(),
   status: z.enum(["included", "optional", "excluded", "deferred"]),
-  features: z.array(z.string()),
-  dependencies: z.array(z.string()),
-  assumptions: z.array(z.string()),
-  citations: z.array(CitationSchema),
+  features: z.array(z.string()).max(6),
+  dependencies: z.array(z.string()).max(4),
+  assumptions: z.array(z.string()).max(4),
+  citations: z.array(CitationSchema).max(4),
 });
 export const WorkstreamSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
   order: z.number().int(),
-  modules: z.array(ScopeModuleSchema),
+  modules: z.array(ScopeModuleSchema).max(5),
 });
-export const ScopeSchema = z.object({ workstreams: z.array(WorkstreamSchema) });
+export const ScopeSchema = z.object({ workstreams: z.array(WorkstreamSchema).max(6) });
 
 export const EstimateLineSchema = z.object({
   id: z.string(),
